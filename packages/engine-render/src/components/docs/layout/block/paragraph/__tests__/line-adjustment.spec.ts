@@ -991,6 +991,46 @@ describe('line-adjustment', () => {
         expect(divide.glyphGroupWidth).toBe(40);
     });
 
+    it.each([HorizontalAlign.JUSTIFIED, HorizontalAlign.BOTH])('widens only the spaces of a Western justified line that holds curly quotes (%s)', (horizontalAlign) => {
+        // Glyph creation marks curly quotes as justifiable, as East Asian punctuation.
+        const quotes = ['’', '“', '”'].map((char) => createGlyph(char, 4, { isJustifiable: true }));
+        const space = createGlyph(' ', 5);
+        const divide = {
+            width: 60,
+            isFull: true,
+            paddingLeft: 0,
+            glyphGroup: [createGlyph('l', 10), quotes[0], createGlyph('a', 10), space, quotes[1], createGlyph('b', 10), quotes[2]],
+        } as any;
+        const context = createPagesWithLine(divide, horizontalAlign);
+
+        lineAdjustment(context.pages, context.viewModel, context.paragraphNode, context.sectionBreakConfig);
+
+        expect(quotes.map((quote) => quote.width)).toEqual([4, 4, 4]);
+        expect(space.width).toBe(18);
+        expect(divide.glyphGroupWidth).toBe(60);
+    });
+
+    it('still justifies curly quotes beside East Asian text', () => {
+        const open = createGlyph('“', 4, { isJustifiable: true });
+        const close = createGlyph('”', 4, { isJustifiable: true });
+        const han = ['文', '字', '中'].map((char) => createGlyph(char, 10, { isJustifiable: true }));
+        const divide = {
+            width: 52,
+            isFull: true,
+            paddingLeft: 0,
+            glyphGroup: [han[0], open, han[1], close, han[2]],
+        } as any;
+        const context = createPagesWithLine(divide, HorizontalAlign.BOTH);
+
+        lineAdjustment(context.pages, context.viewModel, context.paragraphNode, context.sectionBreakConfig);
+
+        // The final Han character takes no extra space; the other four glyphs share the remaining 14.
+        expect(open.width).toBeCloseTo(7.5);
+        expect(close.width).toBeCloseTo(7.5);
+        expect(han.map((glyph) => glyph.width)).toEqual([13.5, 13.5, 10]);
+        expect(divide.glyphGroupWidth).toBe(52);
+    });
+
     it.each([HorizontalAlign.JUSTIFIED, HorizontalAlign.BOTH])('justifies wrapped CJK lines without stretching the paragraph ending (%s)', (horizontalAlign) => {
         const measure = vi.spyOn(FontCache, 'getMeasureText').mockImplementation((text: string) => ({
             width: text.length * 8,

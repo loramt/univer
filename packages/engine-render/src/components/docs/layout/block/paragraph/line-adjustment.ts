@@ -51,6 +51,7 @@ import {
     getGlyphGroupStretchability,
     glyphShrinkLeft,
     glyphShrinkRight,
+    isSpace,
     removeGlyphAutoSpacing,
     setGlyphGroupLeft,
 } from '../../model/glyph';
@@ -88,11 +89,12 @@ function overhang(c: string): number {
 }
 
 function getJustifiables(divide: IDocumentSkeletonDivide): number {
-    const justifiables = divide.glyphGroup.filter((glyph) => isExtraJustifiable(glyph)).length;
-    const lastGlyph = divide.glyphGroup[divide.glyphGroup.length - 1];
+    const { glyphGroup } = divide;
+    const justifiables = glyphGroup.filter((_, index) => isExtraJustifiable(glyphGroup, index)).length;
+    const lastGlyph = glyphGroup[glyphGroup.length - 1];
 
     // CJK character at line end should not be adjusted.
-    if (cjk.hasCJK(lastGlyph.content) && isExtraJustifiable(lastGlyph)) {
+    if (cjk.hasCJK(lastGlyph.content) && isExtraJustifiable(glyphGroup, glyphGroup.length - 1)) {
         return justifiables - 1;
     }
 
@@ -105,14 +107,25 @@ function getJustifiables(divide: IDocumentSkeletonDivide): number {
  * Word keeps East Asian punctuation at its shaped width and stretches the line between words and
  * characters instead, so a Latin run that holds a few brackets or commas must not absorb the whole
  * remainder into those glyphs.
+ *
+ * Curly quotes and the middle dot belong to East Asian and Western text alike. They justify as
+ * East Asian text only beside it: in Western text Word widens the spaces alone, so an apostrophe
+ * inside a word such as "l’anno" must not open a gap.
  */
-function isExtraJustifiable(glyph: IDocumentSkeletonGlyph): boolean {
-    return glyph.isJustifiable && !cjk.hasCJKPunctuation(glyph.content);
+function isExtraJustifiable(glyphGroup: IDocumentSkeletonGlyph[], index: number): boolean {
+    const glyph = glyphGroup[index];
+    if (!glyph.isJustifiable || cjk.hasCJKPunctuation(glyph.content)) {
+        return false;
+    }
+    if (isSpace(glyph.content) || cjk.hasCJK(glyph.content)) {
+        return true;
+    }
+    return cjk.hasCJK(glyphGroup[index - 1]?.content ?? '') || cjk.hasCJK(glyphGroup[index + 1]?.content ?? '');
 }
 
 function adjustGlyphsInDivide(divide: IDocumentSkeletonDivide, justificationRatio: number, extraJustification: number) {
     const lastGlyph = divide.glyphGroup[divide.glyphGroup.length - 1];
-    for (const glyph of divide.glyphGroup) {
+    for (const [index, glyph] of divide.glyphGroup.entries()) {
         const adjustabilityLeft = justificationRatio < 0
             ? glyph.adjustability.shrinkability[0]
             : glyph.adjustability.stretchability[0];
@@ -123,7 +136,7 @@ function adjustGlyphsInDivide(divide: IDocumentSkeletonDivide, justificationRati
         const justificationLeft = adjustabilityLeft * justificationRatio;
         let justificationRight = adjustabilityRight * justificationRatio;
 
-        if (isExtraJustifiable(glyph) && (glyph !== lastGlyph || !cjk.hasCJK(glyph.content))) {
+        if (isExtraJustifiable(divide.glyphGroup, index) && (glyph !== lastGlyph || !cjk.hasCJK(glyph.content))) {
             justificationRight += extraJustification;
         }
 
