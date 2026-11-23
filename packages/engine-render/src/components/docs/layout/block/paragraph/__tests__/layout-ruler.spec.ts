@@ -1523,7 +1523,7 @@ describe('layout-ruler', () => {
         { content: 'aa bb cc dddd ee', width: 98, horizontalAlign: HorizontalAlign.BOTH, hanging: false, first: 'aa bb cc dddd', count: 2 },
         { content: 'aa bb cc dddd ee', width: 97.9, horizontalAlign: HorizontalAlign.BOTH, hanging: false, first: 'aa bb cc', count: 2 },
         { content: 'aa bb cc dddd ee', width: 98, horizontalAlign: HorizontalAlign.LEFT, hanging: false, first: 'aa bb cc', count: 2 },
-        { content: 'aa bb cc dd ee', width: 82, horizontalAlign: HorizontalAlign.BOTH, hanging: false, first: 'aa bb cc', count: 2 },
+        { content: 'aa bb cc dd ee', width: 82, horizontalAlign: HorizontalAlign.BOTH, hanging: false, first: 'aa bb cc dd', count: 2 },
         { content: 'aa bb cc dd ee', width: 84, horizontalAlign: HorizontalAlign.BOTH, hanging: false, first: 'aa bb cc dd', count: 2 },
         { content: 'aa bb cc dd', width: 82, horizontalAlign: HorizontalAlign.BOTH, hanging: false, first: 'aa bb cc dd', count: 1 },
         { content: 'aa bb cc dd', width: 82, horizontalAlign: HorizontalAlign.JUSTIFIED, hanging: false, first: 'aa bb cc dd', count: 1 },
@@ -1534,6 +1534,12 @@ describe('layout-ruler', () => {
         { content: 'aa bb cc dd.', width: 86, horizontalAlign: HorizontalAlign.BOTH, hanging: false, first: 'aa bb cc', count: 2 },
         { content: 'aa bb cc dd.x', width: 86, horizontalAlign: HorizontalAlign.BOTH, hanging: true, first: 'aa bb cc', count: 2 },
         { content: 'aa bb cc dd....', width: 86, horizontalAlign: HorizontalAlign.BOTH, hanging: true, first: 'aa bb cc', count: 2 },
+        // Each space may narrow by at most half of what each space of the shorter line would widen.
+        { content: 'aa bb cc dd e ff', width: 97.61, horizontalAlign: HorizontalAlign.BOTH, hanging: false, first: 'aa bb cc dd e', count: 2 },
+        { content: 'aa bb cc dd e ff', width: 97.59, horizontalAlign: HorizontalAlign.BOTH, hanging: false, first: 'aa bb cc dd', count: 2 },
+        // ...and by at most a quarter of its width, however much the shorter line would widen.
+        { content: 'aa bb cc dd eeee ff', width: 120, horizontalAlign: HorizontalAlign.BOTH, hanging: false, first: 'aa bb cc dd eeee', count: 2 },
+        { content: 'aa bb cc dd eeee ff', width: 119.99, horizontalAlign: HorizontalAlign.BOTH, hanging: false, first: 'aa bb cc dd', count: 2 },
     ])('bounds Word justified compression and terminal punctuation ($content/$width/$horizontalAlign/$hanging)', ({ content, width, horizontalAlign, hanging, first, count }) => {
         const { ctx, paragraphNode, viewModel, sectionBreakConfig, curPage } = createParagraphLayoutTestBed(content, {
             documentStyle: {

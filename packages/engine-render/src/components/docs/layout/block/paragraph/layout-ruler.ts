@@ -176,6 +176,7 @@ function isGlyphGroupBeyondDivideWidth(
             punctuationIndex--;
         }
     }
+    const trailingSpaces = trailingIndex - punctuationIndex;
     const punctuationGlyph = glyphGroup[punctuationIndex];
     const alternateLanguage = punctuationGlyph?.ts?.altLang;
     // ASCII punctuation uses the primary run language; CJK punctuation can use the alternate language.
@@ -212,13 +213,29 @@ function isGlyphGroupBeyondDivideWidth(
         while (lastTab >= 0 && preceding[lastTab].glyphType !== GlyphType.TAB) {
             lastTab--;
         }
-        // Word can tighten justified spaces by one quarter, including on the
-        // terminal line without punctuation, but chooses the closer legal break.
-        const spaces = [...preceding.slice(lastTab + 1), ...glyphGroup.slice(0, trailingIndex + 1)]
+        // Word (compatibility mode 15 and later) keeps the group on a justified line, including the
+        // terminal line without punctuation, when two conditions hold:
+        // - every space is narrowed by at most one quarter of its width;
+        // - each space is narrowed by at most half of what each space of the shorter line would widen.
+        const lineSpaces = preceding.slice(lastTab + 1);
+        const spaces = [...lineSpaces, ...glyphGroup.slice(0, trailingIndex + 1)]
             .filter((glyph) => glyph.content === DataStreamTreeTokenType.SPACE);
         const shrink = spaces.reduce((sum, glyph) => sum + glyph.width / 4, 0) - trailingSpace / 4;
-        return overflow - hanging > shrink + 1e-6
-            || overflow + trailingSpace - hanging > Math.max(0, divideWidth - offsetLeft) + 1e-6;
+        const compression = overflow - hanging;
+        if (compression > shrink + 1e-6) {
+            return true;
+        }
+        // Without the group, the line ends at its last word: its trailing spaces neither widen nor count.
+        let precedingTrailingSpace = 0;
+        let precedingTrailingSpaces = 0;
+        for (let index = lineSpaces.length - 1; index >= 0 && lineSpaces[index].content === DataStreamTreeTokenType.SPACE; index--) {
+            precedingTrailingSpace += lineSpaces[index].width;
+            precedingTrailingSpaces++;
+        }
+        const compressedSpaces = spaces.length - trailingSpaces;
+        const expandedSpaces = lineSpaces.filter((glyph) => glyph.content === DataStreamTreeTokenType.SPACE).length - precedingTrailingSpaces;
+        const expansion = divideWidth - offsetLeft + precedingTrailingSpace;
+        return compression * expandedSpaces * 2 > expansion * compressedSpaces + 1e-6;
     }
     if (!isBeyondDivideWidth(offsetLeft + width, divideWidth, lineWrapTolerance)) {
         return false;
