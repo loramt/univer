@@ -15,9 +15,19 @@
  */
 
 import type { IColorStyle, Nullable } from '@univerjs/core';
-import { getColorStyle } from '@univerjs/core';
+import { getColorStyle, ThemeService } from '@univerjs/core';
 
 const THEME_COLOR_TOKEN_PATTERN = /^[a-z][a-z0-9-]*\.\d+$/i;
+
+// Theme tokens (`blue.600`, the colour Univer gives the text of a link) are no colour a canvas reads: it would keep
+// the previous fill, black in practice. They are resolved against the default theme, as the text of a document has
+// the same colour in every theme of the interface.
+let defaultThemeColors: Nullable<ThemeService> = null;
+function themeColor(token: string): Nullable<string> {
+    defaultThemeColors ??= new ThemeService();
+    const value = defaultThemeColors.getColorFromTheme<unknown>(token);
+    return typeof value === 'string' ? value.toLowerCase() : null;
+}
 
 export function getColorStyleForCanvas(color: Nullable<IColorStyle>): Nullable<string> {
     const rgb = color?.rgb;
@@ -25,7 +35,7 @@ export function getColorStyleForCanvas(color: Nullable<IColorStyle>): Nullable<s
         return undefined;
     }
     if (rgb && THEME_COLOR_TOKEN_PATTERN.test(rgb)) {
-        return rgb;
+        return themeColor(rgb) ?? rgb;
     }
 
     // Older imported snapshots retain OOXML's bare RRGGBB form. ColorKit

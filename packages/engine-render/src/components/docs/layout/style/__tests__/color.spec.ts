@@ -31,13 +31,15 @@ describe('getColorStyleForCanvas', () => {
     });
 
     it.each([
-        ['blue.600', 'blue.600'],
+        ['blue.600', '#1c64f2'],
+        ['primary.600', '#2c53f1'],
+        ['nocolor.600', 'nocolor.600'],
         ['#0000FF', '#0000ff'],
         ['rgb(39, 79, 238)', '#274fee'],
         ['rgba(255, 0, 0, 0)', '#ff000000'],
         ['red', '#ff0000'],
         ['#1234', '#11223344'],
-    ])('preserves CSS colors and theme tokens: %s', (rgb, expected) => {
+    ])('normalizes CSS colors and resolves theme tokens: %s', (rgb, expected) => {
         expect(getColorStyleForCanvas({ rgb })).toBe(expected);
     });
 
