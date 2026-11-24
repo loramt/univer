@@ -38,6 +38,19 @@ function segments(document: IDocumentData, text: string): string[] {
 }
 
 describe('document word wrapping', () => {
+    it('breaks after a dash but not before one that follows a word, as Word does', () => {
+        const document: IDocumentData = { id: 'doc', documentStyle: { documentFlavor: DocumentFlavor.MODERN } };
+        // Word measured with every dash at the margin: em dash, en dash and hyphen behave the same.
+        for (const dash of ['\u2014', '\u2013', '-']) {
+            expect(segments(document, `office${dash}fly`)).toEqual([`office${dash}`, 'fly']);
+            expect(segments(document, `office ${dash}fly`)).toEqual(['office ', `${dash}`, 'fly']);
+            expect(segments(document, `office${dash} fly`)).toEqual([`office${dash} `, 'fly']);
+            expect(segments(document, `office ${dash} fly`)).toEqual(['office ', `${dash} `, 'fly']);
+        }
+        // Two em dashes stay together.
+        expect(segments(document, 'a\u2014\u2014b')).toEqual(['a\u2014\u2014', 'b']);
+    });
+
     it('uses authored Korean language for spreadsheet shapes while preserving Latin words in Korean runs', () => {
         const document: IDocumentData = {
             id: 'shape',

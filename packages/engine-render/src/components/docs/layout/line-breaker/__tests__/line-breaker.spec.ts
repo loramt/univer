@@ -21,7 +21,7 @@ import { describe, expect, it } from 'vitest';
 import type { BreakPointType } from '../break';
 import { eastAsianQuoteLineBreakExtension } from '../extensions/east-asian-quote-linebreak-extension';
 import { tabLineBreakExtension } from '../extensions/tab-linebreak-extension';
-import { DocumentLineBreaker, LineBreaker } from '../line-breaker';
+import { DocumentLineBreaker, LineBreaker, WordLineBreaker } from '../line-breaker';
 
 it.each(['NFC', 'NFD'] as const)('keeps Korean words intact while preserving mandatory breaks (%s)', (normalization) => {
     const words = ['오늘 ', '회의에서 ', '다음 ', '분기 ', '마케팅 ', '전략을 ', '논의했습니다\r\n', '다음 ', '회의'];
@@ -147,6 +147,7 @@ it('passes supported Unicode line break tests', () => {
     });
 });
 
+// Documents follow Word's rules over UAX #14 (WordLineBreaker): outside Hangul their breaker keeps those.
 it('preserves Unicode break opportunities outside Hangul when word splitting is disabled', () => {
     const lines = fs.readFileSync(resolve(__dirname, 'LineBreakTest.txt'), 'utf8').split('\n');
     for (const line of lines) {
@@ -160,7 +161,7 @@ it('preserves Unicode break opportunities outside Hangul when word splitting is 
             continue;
         }
         const positions = (wordWrap?: BooleanNumber) => {
-            const breaker = wordWrap == null ? new LineBreaker(content) : new DocumentLineBreaker(content, wordWrap);
+            const breaker = wordWrap == null ? new WordLineBreaker(content) : new DocumentLineBreaker(content, wordWrap);
             const result: Array<{ position: number; type: BreakPointType }> = [];
             for (let point = breaker.nextBreakPoint(); point; point = breaker.nextBreakPoint()) {
                 result.push({ position: point.position, type: point.type });

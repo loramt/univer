@@ -16,12 +16,13 @@
 
 import type { IDocumentBody, IDocumentData, IParagraphStyle } from '@univerjs/core';
 import { BooleanNumber, DocumentFlavor } from '@univerjs/core';
-import { DocumentLineBreaker, LineBreaker } from './line-breaker';
+import type { LineBreaker } from './line-breaker';
+import { DocumentLineBreaker, WordLineBreaker } from './line-breaker';
 
 export function createDocumentLineBreaker(document: IDocumentData, paragraphStyle: IParagraphStyle, content: string, start: number, body: IDocumentBody | undefined = document.body): LineBreaker {
     const wordWrap = paragraphStyle.wordWrap ?? BooleanNumber.FALSE;
     if (wordWrap === BooleanNumber.FALSE ? !/\p{Script=Hangul}/u.test(content) : !/\p{Script=Latin}/u.test(content)) {
-        return new LineBreaker(content);
+        return new WordLineBreaker(content);
     }
     const inferKorean = document.documentStyle?.documentFlavor === DocumentFlavor.MODERN
         || document.documentStyle?.documentFlavor === DocumentFlavor.TRADITIONAL

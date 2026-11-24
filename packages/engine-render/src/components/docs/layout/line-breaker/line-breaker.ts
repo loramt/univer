@@ -18,7 +18,7 @@ import type { Nullable } from '@univerjs/core';
 import { BooleanNumber } from '@univerjs/core';
 import type { ILineBreakRule } from './rule';
 import { Break, BreakPointType } from './break';
-import { AI, AL, BA, BK, CJ, CR, H2, H3, HL, HY, ID, JL, JT, JV, LF, NL, NS, RI, SA, SG, SP, WJ, XX, ZWJ } from './classes';
+import { AI, AL, B2, BA, BK, CJ, CR, H2, H3, HL, HY, ID, JL, JT, JV, LF, NL, NS, RI, SA, SG, SP, WJ, XX, ZWJ } from './classes';
 import { CI_BRK, CP_BRK, DI_BRK, IN_BRK, pairTable, PR_BRK } from './pairs';
 import { Rule } from './rule';
 import data from './trie-data';
@@ -181,11 +181,16 @@ export class LineBreaker implements IBreakPoints {
         return null;
     }
 
+    /** The kind of break between two classes: the pair table of UAX #14. */
+    protected _pairBreak(curClass: number, nextClass: number): number {
+        return pairTable[curClass][nextClass];
+    }
+
     private _getPairTableBreak(lastClass: number) {
         // if not handled already, use the pair table
         let shouldBreak = false;
 
-        switch (pairTable[this._curClass!][this._nextClass!]) {
+        switch (this._pairBreak(this._curClass!, this._nextClass!)) {
             case DI_BRK: // Direct break
                 shouldBreak = true;
                 break;
@@ -241,7 +246,23 @@ export class LineBreaker implements IBreakPoints {
     }
 }
 
-export class DocumentLineBreaker extends LineBreaker {
+/**
+ * Line breaks of documents, as Word makes them. UAX #14 allows a break before an em dash (B2) as well as after it;
+ * Word breaks after an em dash but never before one that follows a letter or a number, as it does for the en dash
+ * and the hyphen (BA, HY): "office—fly" ends a line as "office—", never as "office" with "—fly" below. After a
+ * space the break before the dash stays, as for the other dashes.
+ */
+export class WordLineBreaker extends LineBreaker {
+    protected override _pairBreak(curClass: number, nextClass: number): number {
+        const pair = pairTable[curClass][nextClass];
+        if (nextClass === B2 && pair === DI_BRK && pairTable[curClass][BA] === IN_BRK) {
+            return IN_BRK;
+        }
+        return pair;
+    }
+}
+
+export class DocumentLineBreaker extends WordLineBreaker {
     constructor(
         content: string,
         private readonly _wordWrap: BooleanNumber,
