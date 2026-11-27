@@ -110,7 +110,7 @@ describe('text boxes', () => {
         expect(ctx.moveTo).toHaveBeenCalledWith(10 + 10, 20);
         expect(ctx.fill).toHaveBeenCalledTimes(1);
 
-        ctx.stroke.mockClear();
+        (ctx.stroke as unknown as ReturnType<typeof vi.fn>).mockClear();
         drawDocTextBoxShape(ctx, { geometry: 'rect' }, frame);
         expect(ctx.stroke).not.toHaveBeenCalled();
     });

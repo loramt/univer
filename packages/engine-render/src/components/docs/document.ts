@@ -17,6 +17,7 @@
 import type {
     ICustomRange,
     IDisposable,
+    IDocDrawingBase,
     IParagraphBorder,
     IScale,
     ITableCell,
@@ -59,6 +60,7 @@ import type { ComponentExtension, IDrawInfo, IExtensionConfig } from '../extensi
 import type { IDocumentRenderBounds, IDocumentsConfig, IPageMarginLayout } from './doc-component';
 import type { IDocumentLayoutRenderConfig } from './document-layout-presentation';
 import type { DocumentSkeleton } from './layout/doc-skeleton';
+import type { IMetafile } from './metafile';
 import type { IDocsTableRenderViewport } from './table-render-viewport';
 import type { DocumentViewModel } from './view-model/document-view-model';
 import { BORDER_TYPE, COLOR_BLACK_RGB } from '../../basics/const';
@@ -90,6 +92,7 @@ import {
 } from './layout/table-cell-spacing';
 import { documentSkeletonTableIterator } from './layout/tools';
 import { Liquid } from './liquid';
+import { drawEmf, parseEmf } from './metafile';
 import { drawPageBorders, getDocumentBorderBands, getDocumentBorderWidth } from './page-borders';
 import {
     getDocsTableLayoutViewportWidth,
@@ -328,6 +331,9 @@ export class Documents extends DocComponent {
 
     /** The documents of the text boxes drawn on the pages (drawings with a content of their own). */
     private _textBoxes?: DocTextBoxPainter;
+
+    /** The metafiles of the drawings, parsed once. */
+    private readonly _metafiles = new Map<string, { source: string; emf: IMetafile | undefined }>();
 
     constructor(oKey: string, documentSkeleton?: DocumentSkeleton, config?: IDocumentsConfig) {
         super(oKey, documentSkeleton, config);
@@ -781,11 +787,21 @@ export class Documents extends DocComponent {
         for (const [segment, segmentTop] of segments) {
             for (const drawing of segment.skeDrawings?.values() ?? []) {
                 const textBox = getDocTextBox(drawing.drawingOrigin);
-                if (!textBox || (drawing.drawingOrigin.behindDoc === BooleanNumber.TRUE) !== behind) {
+                const metafile = textBox ? undefined : this._metafileOf(drawing.drawingOrigin);
+                if ((!textBox && !metafile) || (drawing.drawingOrigin.behindDoc === BooleanNumber.TRUE) !== behind) {
                     continue;
                 }
                 const frame = getDocTextBoxFrame(drawing, segmentTop, page.marginLeft, page);
                 const placed = { ...frame, left: frame.left + pageOriginX, top: frame.top + pageOriginY };
+                if (metafile) {
+                    // a Windows metafile, which no browser draws: its records played on the page
+                    const crop = (drawing.drawingOrigin as { srcRect?: { left?: number; top?: number; right?: number; bottom?: number } }).srcRect;
+                    drawEmf(ctx, metafile, placed, { crop });
+                    continue;
+                }
+                if (!textBox) {
+                    continue;
+                }
                 drawDocTextBoxShape(ctx, textBox.shape, placed);
                 this._textBoxes ??= new DocTextBoxPainter((key, child) => new Documents(key, child, { pageMarginLeft: 0, pageMarginTop: 0 }));
                 this._textBoxes.draw(ctx, drawing.drawingId, textBox, placed, skeleton, {
@@ -795,6 +811,32 @@ export class Documents extends DocComponent {
                 });
             }
         }
+    }
+
+    /** The parsed EMF of a drawing that has one (drawings[id].metafile, the file in `original`), kept per drawing. */
+    private _metafileOf(drawing: IDocDrawingBase): IMetafile | undefined {
+        const data = drawing as IDocDrawingBase & { metafile?: unknown; original?: unknown };
+        if (data.metafile !== 'emf' || typeof data.original !== 'string') {
+            return undefined;
+        }
+        const cached = this._metafiles.get(data.drawingId);
+        if (cached && cached.source === data.original) {
+            return cached.emf;
+        }
+        let emf: IMetafile | undefined;
+        try {
+            const base64 = data.original.slice(data.original.indexOf(',') + 1);
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            emf = parseEmf(bytes);
+        } catch {
+            emf = undefined;
+        }
+        this._metafiles.set(data.drawingId, { source: data.original, emf });
+        return emf;
     }
 
     private _drawBodySections(
