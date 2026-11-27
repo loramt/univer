@@ -421,17 +421,25 @@ export class DocumentFootnoteLayout {
                     // A cell is shaped before its physical page is known. Rebuild the
                     // row when its page-local marker changes, including marker width.
                     changed = this._updateReferenceLabels(measurePage, incoming) || changed;
-                    const lastReference = lines[lines.length - 1];
-                    const minimumBottom = lastReference?.bottom ?? Math.min(row.height, available);
-                    const limit = this.getBodyLimit(measurePage, measurePages, config, offset + minimumBottom, incoming) - offset;
-                    const deferredIds = new Set(this._pages.get(measurePage)?.following.flatMap((fragments) => fragments.filter((fragment) => !fragment.continued).map((fragment) => fragment.noteId)));
-                    const deferredLine = lines.find((line) => line.top > 0 && line.glyphs.some((glyph) => deferredIds.has(glyph.noteId!)));
-                    // A continuing note can postpone later notes. Split before a later
-                    // reference line so its first note fragment follows it to the next page.
-                    const capacity = Math.max(1, Math.min(
-                        limit < minimumBottom && lastReference ? lastReference.top : limit,
-                        deferredLine?.top ?? Number.POSITIVE_INFINITY
-                    ));
+                    const preceding = onCurrentPage ? incoming.slice(lines.reduce((count, line) => count + line.glyphs.length, 0)) : [];
+                    // Where the row can end on this page: after as many of its reference lines as can keep their
+                    // notes on the page, below the text (a note never starts on a page after its reference). The
+                    // lines are tried from the last one up, as Word fills the page: a note that has no room, or
+                    // that a continuing note postpones, sends its reference line, and those after it, on.
+                    let capacity = 1;
+                    for (let kept = lines.length; kept >= 0; kept--) {
+                        const keptLines = lines.slice(0, kept);
+                        const bottom = kept === lines.length
+                            ? (lines[lines.length - 1]?.bottom ?? Math.min(row.height, available))
+                            : (keptLines[kept - 1]?.bottom ?? 0);
+                        const limit = this.getBodyLimit(measurePage, measurePages, config, offset + bottom, [...keptLines.flatMap((line) => line.glyphs), ...preceding]) - offset;
+                        const deferredIds = new Set(this._pages.get(measurePage)?.following.flatMap((fragments) => fragments.filter((fragment) => !fragment.continued).map((fragment) => fragment.noteId)));
+                        const deferred = keptLines.some((line) => line.top > 0 && line.glyphs.some((glyph) => deferredIds.has(glyph.noteId!)));
+                        if (kept === 0 || (!deferred && limit >= bottom)) {
+                            capacity = Math.max(1, Math.min(limit, lines[kept]?.top ?? Number.POSITIVE_INFINITY));
+                            break;
+                        }
+                    }
                     if (row.height > capacity + 0.01 && capacity + 0.01 < available) {
                         heights[index] = capacity;
                         changed = true;
