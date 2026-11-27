@@ -388,7 +388,7 @@ export class DocumentFootnoteLayout {
                 }
                 return changed;
             },
-            measureRow: (table: IDocumentSkeletonTable, rows: IDocumentSkeletonTable['rows'], previousHeights?: readonly number[]): number[] | undefined => {
+            measureRow: (table: IDocumentSkeletonTable, rows: IDocumentSkeletonTable['rows'], previousHeights?: readonly number[], startsOnNextPage = false): number[] | undefined => {
                 let measurePage = { ...current, skeTables: new Map(current.skeTables) };
                 const measurePages = [measurePage];
                 this._inherited.set(measurePage, this._getInherited(current, pages, config));
@@ -396,11 +396,18 @@ export class DocumentFootnoteLayout {
                 if (accepted) {
                     this._pages.set(measurePage, accepted);
                 }
+                if (startsOnNextPage) {
+                    // The row cannot start in what is left of the current page (its minimum height does not fit):
+                    // its first fragment begins the next page, which it measures against.
+                    measurePage = createSkeletonPage(this._ctx, config, this._ctx.skeletonResourceReference, getNextSkeletonPageNumber(measurePage, config));
+                    measurePages.push(measurePage);
+                }
                 const heights = [...(previousHeights ?? [])];
                 let changed = false;
                 for (let index = 0; index < rows.length; index++) {
                     const row = rows[index];
-                    const offset = index === 0 ? top + table.height : 0;
+                    const onCurrentPage = index === 0 && !startsOnNextPage;
+                    const offset = onCurrentPage ? top + table.height : 0;
                     const contentHeight = measurePage.pageHeight - measurePage.marginTop - measurePage.marginBottom;
                     const available = heights[index] ?? contentHeight - offset;
                     const lines = row.cells
@@ -408,7 +415,7 @@ export class DocumentFootnoteLayout {
                         .filter((line) => line.bottom <= available)
                         .sort((left, right) => left.bottom - right.bottom);
                     const incoming = lines.flatMap((line) => line.glyphs);
-                    if (index === 0) {
+                    if (onCurrentPage) {
                         incoming.push(...table.rows.flatMap((item) => item.cells.flatMap(collectPageReferenceGlyphs)));
                     }
                     // A cell is shaped before its physical page is known. Rebuild the

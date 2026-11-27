@@ -890,6 +890,8 @@ function getAvailableHeight(curPage: IDocumentSkeletonPage, cache: ICreateTableC
 }
 
 interface ITableRowPageHeights {
+    /** The row does not fit in what is left of the page and starts the next one. */
+    opensNewPage: boolean;
     firstBorderHeight: number;
     minimumHeight: number;
     firstCellPageHeight: number;
@@ -927,7 +929,7 @@ function getTableRowPageHeights(
     const needOpenNewTable = cache.remainHeight <= firstBorderHeight ||
         (minimumHeight <= availableHeight && minimumHeight + firstBorderHeight > cache.remainHeight);
     const firstCellPageHeight = canRowSplit && !needOpenNewTable ? cache.remainHeight - firstBorderHeight : availableHeight;
-    return { firstBorderHeight, minimumHeight, firstCellPageHeight, pageContentHeight, availableHeight, canRowSplit, suppressContinuationTopSpacing };
+    return { opensNewPage: canRowSplit && needOpenNewTable, firstBorderHeight, minimumHeight, firstCellPageHeight, pageContentHeight, availableHeight, canRowSplit, suppressContinuationTopSpacing };
 }
 
 function canReusePrecomputedTableRow(
@@ -1079,7 +1081,7 @@ function dealWithTableRow(
     const { children: cellNodes, startIndex, endIndex } = rowNode;
     const rowSource = table.tableRows[row];
     const traditional = isTraditionalDocumentCompatibility(documentCompatibilityPolicy);
-    const { firstBorderHeight, minimumHeight, firstCellPageHeight, pageContentHeight, availableHeight, canRowSplit, suppressContinuationTopSpacing } =
+    const { opensNewPage, firstBorderHeight, minimumHeight, firstCellPageHeight, pageContentHeight, availableHeight, canRowSplit, suppressContinuationTopSpacing } =
         getTableRowPageHeights(curPage, skeTables, table, row, cache, traditional, isRepeatRow);
     const precomputedRowFits = !isRepeatRow && cellPageHeights == null && canReusePrecomputedTableRow(curPage, cache, rowSource, precomputedRow, firstBorderHeight, minimumHeight);
     const rowSkeletons: IDocumentSkeletonRow[] = precomputedRowFits ? [precomputedRow] : [];
@@ -1167,7 +1169,8 @@ function dealWithTableRow(
     if (!isRepeatRow && cache.notes) {
         let nextHeights: number[] | undefined;
         if (canRowSplit) {
-            nextHeights = cache.notes.measureRow(curTableSkeleton, rowSkeletons, cellPageHeights);
+            // A row that starts the next page is measured against that page, not against what is left of this one.
+            nextHeights = cache.notes.measureRow(curTableSkeleton, rowSkeletons, cellPageHeights, opensNewPage);
         } else if (cache.notes.renumberWholeRow(curTableSkeleton, rowSkeletons, cache.remainHeight)) {
             nextHeights = [];
         }
