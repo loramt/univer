@@ -2394,6 +2394,7 @@ describe('linebreaking', () => {
         try {
             const { ctx, paragraphNode, viewModel, curPage, sectionBreakConfig } = bed;
             const shaped = shaping(ctx, paragraphNode.content!, viewModel, paragraphNode, sectionBreakConfig);
+            (globalThis as any).__debugDivide = true;
             lineBreaking(ctx, viewModel, shaped, curPage, paragraphNode, sectionBreakConfig, null);
             const line = curPage.sections[0].columns[0].lines[0];
             expect(line.borderTopSpace).toBe(7);
@@ -2872,6 +2873,32 @@ describe('linebreaking', () => {
         expect(drawing?.height).toBe(120);
     });
 
+    it('puts consecutive inline pictures as wide as the text on lines of their own, as Word does', () => {
+        // Word 365, the Mosaico: five pictures as wide as the text in one paragraph take a line each.
+        const content = DataStreamTreeTokenType.CUSTOM_BLOCK.repeat(3);
+        const picture = (drawingId: string) => ({
+            drawingId,
+            layoutType: PositionedObjectLayoutType.INLINE,
+            docTransform: { angle: 0, positionH: {}, positionV: {}, size: { width: 359.9, height: 50 } },
+        });
+        const { viewModel, ctx, paragraphNode, sectionBreakConfig, curPage } = createParagraphLayoutTestBed(content, {
+            documentStyle: {
+                documentFlavor: DocumentFlavor.TRADITIONAL,
+                pageSize: { width: 400, height: 600 },
+                marginLeft: 20,
+                marginRight: 20,
+            },
+            body: {
+                customBlocks: [0, 1, 2].map((startIndex) => ({ startIndex, blockId: `picture-${startIndex}` })),
+            },
+            drawings: Object.fromEntries([0, 1, 2].map((index) => [`picture-${index}`, picture(`picture-${index}`)])),
+        });
+        lineBreaking(ctx, viewModel, shaping(ctx, paragraphNode.content!, viewModel, paragraphNode, sectionBreakConfig), curPage, paragraphNode, sectionBreakConfig, null);
+
+        const lines = curPage.sections[0].columns[0].lines;
+        expect(lines.map((line) => line.divides[0].glyphGroup.filter((glyph) => glyph.streamType === DataStreamTreeTokenType.CUSTOM_BLOCK).length)).toEqual([1, 1, 1]);
+    });
+
     it('does not multiply an inline drawing height when it follows text', () => {
         const content = `Before${DataStreamTreeTokenType.CUSTOM_BLOCK}after`;
         const { viewModel, ctx, paragraphNode, sectionBreakConfig, curPage } = createParagraphLayoutTestBed(content, {
@@ -2940,6 +2967,7 @@ describe('linebreaking', () => {
             },
         });
         const shaped = shaping(ctx, paragraphNode.content!, viewModel, paragraphNode, sectionBreakConfig);
+        (globalThis as any).__debugDivide = true;
         const paragraphMark = shaped.flatMap((run) => run.glyphs).find((glyph) => glyph.streamType === DataStreamTreeTokenType.PARAGRAPH);
         const nominalHeight = paragraphMark?.bBox.normalLineHeight ?? 0;
         if (extraLeading) {

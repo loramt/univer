@@ -175,7 +175,9 @@ function _mergeAdjacentCustomBlockShapedTexts(
                 _hasOnlyCustomBlockGlyphs(lastShapedText.glyphs) &&
                 _hasOnlyCustomBlockGlyphs(shapedText.glyphs) &&
                 !_hasTopBottomCustomBlockGlyph(lastShapedText.glyphs, customBlockDrawings) &&
-                !_hasTopBottomCustomBlockGlyph(shapedText.glyphs, customBlockDrawings)
+                !_hasTopBottomCustomBlockGlyph(shapedText.glyphs, customBlockDrawings) &&
+                // Two inline pictures are two break opportunities: Word wraps the second when the line is full.
+                (lastShapedText.glyphs.every((glyph) => glyph.width === 0) || shapedText.glyphs.every((glyph) => glyph.width === 0))
             ) {
                 lastShapedText.text += shapedText.text;
                 lastShapedText.glyphs.push(...shapedText.glyphs);
