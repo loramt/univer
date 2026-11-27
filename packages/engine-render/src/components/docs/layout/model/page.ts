@@ -15,16 +15,7 @@
  */
 
 import type { IDocumentBody, ITable, ITableRow, Nullable } from '@univerjs/core';
-import {
-    BooleanNumber,
-    CustomRangeType,
-    DocumentDataModel,
-    GridType,
-    ObjectRelativeFromV,
-    PageOrientType,
-    PositionedObjectLayoutType,
-    TableTextWrapType,
-} from '@univerjs/core';
+import { BooleanNumber, CustomRangeType, DocumentDataModel, GridType, ObjectRelativeFromV, PageOrientType, PositionedObjectLayoutType, TableAlignmentType, TableTextWrapType } from '@univerjs/core';
 import type {
     IDocumentSkeletonHeaderFooter,
     IDocumentSkeletonPage,
@@ -649,6 +640,20 @@ export function createNullCellPage(
         const insets = getTableCellSpacingInsets(tableConfig, row, col);
         start = { ...start, v: (start.v ?? 0) + insets.left + getCellBorderWidth(cellConfig.borderLeft) / 2 };
         end = { ...end, v: (end.v ?? 0) + insets.right + getCellBorderWidth(cellConfig.borderRight) / 2 };
+    } else if (isTraditionalDocumentCompatibility(documentCompatibilityPolicy) &&
+        Number(ctx.dataModel?.documentStyle?.compatibilitySettings?.compatibilityMode) >= 15) {
+        // Word 2013 and later draw a vertical border from its grid line to the right and lay the text of a cell out
+        // between the centres of its borders: half the left border further right, lines as long. A centred or
+        // right-aligned table is placed by its outer edge, which the last border makes half or all of its width
+        // longer: the whole table, text included, sits that much further left (Word 365, borders of 0.5 pt: text
+        // 0.25 pt further right in left-aligned tables, where it was in centred ones; earlier modes do not).
+        const lastCell = cellConfig && tableRows[row].tableCells[tableRows[row].tableCells.length - 1];
+        const trailing = getCellBorderWidth(lastCell?.borderRight);
+        const outerShift = tableConfig.align === TableAlignmentType.CENTER
+            ? trailing / 2
+            : tableConfig.align === TableAlignmentType.END ? trailing : 0;
+        start = { ...start, v: (start.v ?? 0) + getCellBorderWidth(cellConfig.borderLeft) / 2 - outerShift };
+        end = { ...end, v: (end.v ?? 0) - getCellBorderWidth(cellConfig.borderRight) / 2 + outerShift };
     }
     if (start.v + end.v >= pageWidth) {
         const marginWidth = start.v + end.v;

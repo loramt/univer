@@ -22,6 +22,7 @@ import {
     GridType,
     PageOrientType,
     PositionedObjectLayoutType,
+    TableAlignmentType,
 } from '@univerjs/core';
 import { describe, expect, it, vi } from 'vitest';
 import { DocumentSkeletonPageType } from '../../../../../basics/i-document-skeleton-cached';
@@ -529,6 +530,44 @@ describe('page model', () => {
         expect(ctx.layoutStartPointer['table-1']).toBeUndefined();
         expect(dealWithSectionMock).toHaveBeenCalledTimes(2);
         expect(resetContextMock).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        { align: TableAlignmentType.START, shift: 0.5 / 2 },
+        { align: TableAlignmentType.CENTER, shift: 0 },
+        { align: TableAlignmentType.END, shift: -0.5 / 2 },
+    ])('lays the text of a Word 2013 cell out between the centres of its borders (align $align)', ({ align, shift }) => {
+        // Word 365 draws a vertical border from its grid line to the right: the text of a left-aligned table is half
+        // a border further right, that of a centred table where it was, that of a right-aligned table half a border
+        // further left; lines keep their length.
+        const ctx = {
+            dataModel: { documentStyle: { compatibilitySettings: { compatibilityMode: 15 } } },
+            layoutStartPointer: {},
+            skeletonResourceReference: createSkeletonResourceReference(),
+            isDirty: false,
+        } as any;
+        const sectionBreakConfig = {
+            lists: [],
+            localeService: {} as any,
+            drawings: {},
+            pageSize: { width: 300, height: 200 },
+            headerTreeMap: new Map(),
+            footerTreeMap: new Map(),
+            documentCompatibilityPolicy: getDocumentCompatibilityPolicy(DocumentFlavor.TRADITIONAL),
+        } as any;
+        const border = { color: { rgb: '#000000' }, width: { v: 0.5 }, dashStyle: 1 };
+        const cell = { margin: { start: { v: 7 }, end: { v: 7 }, top: { v: 0 }, bottom: { v: 0 } }, borderLeft: border, borderRight: border };
+        const tableConfig = {
+            tableId: 'aligned-table',
+            align,
+            tableRows: [{ tableCells: [cell, cell] }],
+            tableColumns: [{ size: { width: { v: 100 } } }, { size: { width: { v: 100 } } }],
+        } as any;
+
+        const { sectionBreakConfig: cellConfig } = createNullCellPage(ctx, sectionBreakConfig, tableConfig, 0, 1);
+
+        expect(cellConfig.marginLeft).toBeCloseTo(7 + shift);
+        expect(cellConfig.marginRight).toBeCloseTo(7 - shift);
     });
 
     it('shrinks default cell margins for extremely narrow table columns', () => {
