@@ -21,6 +21,7 @@ import type {
     IColorStyle,
     IDocDrawingBase,
     INestingLevel,
+    INumberUnit,
     IParagraphBorder,
     IParagraphProperties,
     ITable,
@@ -56,6 +57,9 @@ export interface IDocumentSkeletonParagraphBorders {
     borderLeft?: IParagraphBorder;
     borderRight?: IParagraphBorder;
     borderBetween?: IParagraphBorder;
+    /** Word groups bordered paragraphs only when their left and right indents are the same too. */
+    indentStart?: INumberUnit;
+    indentEnd?: INumberUnit;
 }
 
 export interface ISkeletonResourceReference {

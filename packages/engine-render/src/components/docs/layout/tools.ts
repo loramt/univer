@@ -780,11 +780,15 @@ function isSameParagraphBorder(first?: IParagraphBorder, second?: IParagraphBord
 }
 
 export function hasSameParagraphBorderSet(first: IDocumentSkeletonParagraphBorders, second: IDocumentSkeletonParagraphBorders) {
+    // Word draws one box around consecutive paragraphs with the same borders and the same left and right indents;
+    // a list item under a body paragraph with the same borders starts a new box (corpus/mosaico/bordi-vuoti).
     return isSameParagraphBorder(first.borderTop, second.borderTop) &&
         isSameParagraphBorder(first.borderBottom, second.borderBottom) &&
         isSameParagraphBorder(first.borderLeft, second.borderLeft) &&
         isSameParagraphBorder(first.borderRight, second.borderRight) &&
-        isSameParagraphBorder(first.borderBetween, second.borderBetween);
+        isSameParagraphBorder(first.borderBetween, second.borderBetween) &&
+        Math.abs((first.indentStart?.v ?? 0) - (second.indentStart?.v ?? 0)) < 0.01 &&
+        Math.abs((first.indentEnd?.v ?? 0) - (second.indentEnd?.v ?? 0)) < 0.01;
 }
 
 export function updateInlineDrawingCoordsAndBorder(ctx: ILayoutContext, pages: IDocumentSkeletonPage[]) {
@@ -849,6 +853,8 @@ export function updateParagraphBorders(
                 borderLeft: paragraphStyle.borderLeft,
                 borderRight: paragraphStyle.borderRight,
                 borderBetween: paragraphStyle.borderBetween,
+                indentStart: paragraphStyle.indentStart,
+                indentEnd: paragraphStyle.indentEnd,
             };
             bordersByParagraphStyle.set(paragraphStyle, paragraphBorders);
         }

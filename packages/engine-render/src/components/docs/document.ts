@@ -1455,6 +1455,10 @@ export class Documents extends DocComponent {
         const afterSpacing = traditional && line.borderBetween ? line.spaceBelowApply ?? 0 : 0;
         const endY = y + line.lineHeight - line.marginBottom - (line.borderBottomSpace ?? 0) + (bottomBorder?.padding ?? 0) + afterSpacing;
         const drawBorder = (border: IParagraphBorder, type: BORDER_TYPE) => {
+            // A border Word does not draw only keeps its distance from the text (w:val="none" with a w:space).
+            if ((border.width ?? 1) <= 0) {
+                return;
+            }
             const stroke = {
                 width: { v: border.width ?? 1 },
                 color: { rgb: border.color.rgb === 'auto' ? COLOR_BLACK_RGB : getColorStyleForCanvas(border.color) ?? COLOR_BLACK_RGB },

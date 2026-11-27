@@ -541,6 +541,12 @@ interface ICreateTableCache {
     rowTop: number;
     tableWidth: number;
     remainHeight: number;
+    /**
+     * Height of the page the current slice is on, when it is not the page the table started on: a table inside a
+     * cell continues on the cell's following pages, whose heights differ from the first one (it is shortened by
+     * the footnotes of its page, for example).
+     */
+    slicePageHeight?: number;
     repeatRows: DataStreamTreeNode[];
     repeatRowsHeight: number;
     notes?: ReturnType<DocumentFootnoteLayout['createTablePagination']>;
@@ -872,7 +878,8 @@ function getCurTableSkeleton(skeTables: IDocumentSkeletonTable[]): IDocumentSkel
 }
 
 function getAvailableHeight(curPage: IDocumentSkeletonPage, cache: ICreateTableCache, hasRepeatHeader: boolean) {
-    const { marginTop, marginBottom, pageHeight } = curPage;
+    const { marginTop, marginBottom } = curPage;
+    const pageHeight = cache.slicePageHeight ?? curPage.pageHeight;
     let pageContentHeight = pageHeight - marginTop - marginBottom;
 
     if (hasRepeatHeader) {
@@ -1199,6 +1206,7 @@ function dealWithTableRow(
         const shouldOpenNewTable = geometryOverflow || (cache.notes != null && remainingWithNotes == null);
 
         if (shouldOpenNewTable) {
+            cache.slicePageHeight = getContinuationPageHeight(curPage, sectionBreakConfig, skeTables.length);
             cache.notes?.nextPage();
             if ((cache.notes || hasTrailingParagraphSpace) && skeTables.length === 1 && curTableSkeleton.rows.length === 0) {
                 cache.fromCurrentPage = false;
@@ -1247,6 +1255,20 @@ function dealWithTableRow(
 
         cache.rowTop += rowSkeleton.height;
     }
+}
+
+/**
+ * The height of the page the next slice of a table goes on. A body page is as high as the page the table started
+ * on; a cell page (a table inside a cell) as the cell's page with that number, which the row that holds the cell
+ * measured for that page (sectionBreakConfig.cellPageHeights) or the cell's full page height.
+ */
+function getContinuationPageHeight(curPage: IDocumentSkeletonPage, sectionBreakConfig: ISectionBreakConfig, slice: number): number {
+    if (curPage.type !== DocumentSkeletonPageType.CELL) {
+        return curPage.pageHeight;
+    }
+    const pageNumber = (curPage.pageNumber ?? 1) + slice;
+    const height = sectionBreakConfig.cellPageHeights?.[pageNumber - 1] ?? sectionBreakConfig.pageSize?.height;
+    return height != null && Number.isFinite(height) ? height : curPage.pageHeight;
 }
 
 function getCellTrailingParagraphSpacing(cell: IDocumentSkeletonPage): number {

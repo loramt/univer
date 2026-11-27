@@ -20,6 +20,7 @@ import {
     CustomRangeType,
     DocumentDataModel,
     GridType,
+    ObjectRelativeFromV,
     PageOrientType,
     PositionedObjectLayoutType,
     TableTextWrapType,
@@ -476,11 +477,19 @@ function _createSkeletonHeaderFooter(
 }
 
 function positionUnwrappedStoryFrames(page: IDocumentSkeletonHeaderFooter, viewModel: DocumentViewModel, marginLeft: number) {
-    // Positioned text-only frames share editable glyphs with their story. Wrapped
-    // frames and stories with anchored objects require the object-wrap layout path.
-    if (page.skeTables.size > 0 || page.skeDrawings.size > 0) {
+    // Positioned text-only frames share editable glyphs with their story. Wrapped frames, tables and objects
+    // that push text aside require the object-wrap layout path; floating objects that leave the text alone
+    // (no wrapping, as a logo behind a header) only move with the paragraph that anchors them.
+    const wrapsText = [...page.skeDrawings.values()].some((drawing) => {
+        const layoutType = drawing.drawingOrigin?.layoutType;
+        return layoutType != null && layoutType !== PositionedObjectLayoutType.INLINE &&
+            layoutType !== PositionedObjectLayoutType.WRAP_NONE;
+    });
+    if (page.skeTables.size > 0 || wrapsText) {
         return;
     }
+    // How far the lines of each flow paragraph moved up once the frames above them left the flow.
+    const shifts = new Map<number, number>();
     for (const section of page.sections) {
         for (const column of section.columns) {
             const { lines } = column;
@@ -491,6 +500,9 @@ function positionUnwrappedStoryFrames(page: IDocumentSkeletonHeaderFooter, viewM
                 if (frame == null || typeof frame !== 'object' || frame.wrap !== 'none'
                     || frame.verticalAnchor !== 'text' || (frame.yAlign != null && frame.yAlign !== 'top')) {
                     line.top -= removedHeight;
+                    if (!shifts.has(line.paragraphIndex)) {
+                        shifts.set(line.paragraphIndex, removedHeight);
+                    }
                     continue;
                 }
                 const y = frame.yAlign == null ? Number(frame.y ?? 0) / 15 : 0;
@@ -542,6 +554,30 @@ function positionUnwrappedStoryFrames(page: IDocumentSkeletonHeaderFooter, viewM
                 removedHeight += occupiedHeight + anchorSpacing;
                 index = end - 1;
             }
+        }
+    }
+    _shiftParagraphAnchoredDrawings(page, viewModel, shifts);
+}
+
+/** Floating objects placed from their paragraph or line follow it when frames above leave the flow. */
+function _shiftParagraphAnchoredDrawings(page: IDocumentSkeletonHeaderFooter, viewModel: DocumentViewModel, shifts: Map<number, number>) {
+    if (page.skeDrawings.size === 0 || ![...shifts.values()].some((shift) => shift !== 0)) {
+        return;
+    }
+    const body = viewModel.getBody?.();
+    const paragraphs = (body?.paragraphs ?? []).map((paragraph) => paragraph.startIndex).sort((a, b) => a - b);
+    for (const drawing of page.skeDrawings.values()) {
+        const relativeFrom = drawing.drawingOrigin?.docTransform?.positionV?.relativeFrom;
+        if (relativeFrom !== ObjectRelativeFromV.PARAGRAPH && relativeFrom !== ObjectRelativeFromV.LINE) {
+            continue;
+        }
+        const block = body?.customBlocks?.find((item) => item.blockId === drawing.drawingId);
+        const paragraph = block == null ? undefined : paragraphs.find((index) => index >= block.startIndex);
+        const shift = paragraph == null ? 0 : shifts.get(paragraph) ?? 0;
+        if (shift !== 0) {
+            drawing.aTop -= shift;
+            drawing.lineTop -= shift;
+            drawing.blockAnchorTop -= shift;
         }
     }
 }

@@ -2268,7 +2268,8 @@ describe('linebreaking', () => {
 
     it.each([0, 2])('adds traditional border clearance outside collapsed paragraph spacing (width %s)', (width) => {
         const border = { color: { rgb: '#000000' }, padding: 3, width };
-        const borderSpace = width > 0 ? 5 : 0;
+        // A border without a line (Word's w:val="none" with a w:space) still keeps its distance.
+        const borderSpace = width > 0 ? 5 : 3;
         const paragraphs = [1, 3, 5].map((startIndex, index) => ({
             startIndex,
             paragraphId: `border-${index}`,
@@ -2290,6 +2291,67 @@ describe('linebreaking', () => {
         const lines = bed.curPage.sections[0].columns[0].lines;
         expect(lines.map((line) => line.top + line.marginTop + (line.borderTopSpace ?? 0))).toEqual([8, 40 + borderSpace, 72 + 2 * borderSpace]);
         expect(bed.viewModel.getBody()?.paragraphs).toEqual(paragraphs);
+    });
+
+    it('leaves automatic spacing out between two items of the same list, as Word does with web lists', () => {
+        // Word 365, corpus/mosaico/autospaziatura2: 14 pt before and after a list, none between its items, while
+        // items of another list keep it.
+        const auto = { lineSpacing: 1, beforeAutoSpacing: BooleanNumber.TRUE, afterAutoSpacing: BooleanNumber.TRUE };
+        const item = (listId: string) => ({ listType: 'bullet', listId, nestingLevel: 0 });
+        const bed = createSectionLayoutTestBed(['P', 'A', 'B', 'C', 'Q'], {
+            body: {
+                paragraphs: [1, 3, 5, 7, 9].map((startIndex, index) => ({
+                    startIndex,
+                    paragraphStyle: auto,
+                    ...(index === 1 || index === 2 ? { bullet: item('one') } : index === 3 ? { bullet: item('two') } : {}),
+                })),
+            },
+            documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL },
+        });
+        try {
+            for (const [index, node] of bed.sectionNode.children.entries()) {
+                lineBreaking(bed.ctx, bed.viewModel, shaping(bed.ctx, node.content!, bed.viewModel, node, bed.sectionBreakConfig), bed.curPage, node, bed.sectionBreakConfig, null, false, bed.sectionNode.children[index + 1]);
+            }
+            const lines = bed.curPage.sections[0].columns[0].lines;
+            const tops = lines.map((line) => line.top + line.marginTop);
+            const gaps = tops.slice(1).map((top, index) => top - tops[index] - lines[index].lineHeight + lines[index].marginTop);
+            const auto14 = 14 * 4 / 3;
+            // paragraph -> first item, item -> item of the same list, item -> item of another list, item -> paragraph
+            expect(gaps.map((gap) => Math.round(gap) || 0)).toEqual([Math.round(auto14), 0, Math.round(auto14), Math.round(auto14)]);
+        } finally {
+            bed.viewModel.dispose();
+            bed.dataModel.dispose();
+        }
+    });
+
+    it('starts a new border box where the indents change, as Word does', () => {
+        // Word 365, the Mosaico: a body paragraph and a list item below it with the same border take its distance
+        // twice, because Word groups bordered paragraphs only when their left and right indents are the same.
+        const border = { color: { rgb: '#000000' }, padding: 6, width: 0 };
+        const paragraphs = [1, 3, 5].map((startIndex, index) => ({
+            startIndex,
+            paragraphStyle: {
+                spacingRule: SpacingRule.EXACT,
+                lineSpacing: 20,
+                borderBottom: border,
+                ...(index === 2 ? { indentStart: { v: 48 } } : {}),
+            },
+        }));
+        const bed = createSectionLayoutTestBed(['A', 'B', 'C'], {
+            body: { paragraphs },
+            documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL },
+        });
+        try {
+            for (const [index, node] of bed.sectionNode.children.entries()) {
+                lineBreaking(bed.ctx, bed.viewModel, shaping(bed.ctx, node.content!, bed.viewModel, node, bed.sectionBreakConfig), bed.curPage, node, bed.sectionBreakConfig, null, false, bed.sectionNode.children[index + 1]);
+            }
+            const lines = bed.curPage.sections[0].columns[0].lines;
+            // A and B form a box (no distance between them); B ends it before the indented C, which ends its own.
+            expect(lines.map((line) => line.borderBottomSpace ?? 0)).toEqual([0, 6, 6]);
+        } finally {
+            bed.viewModel.dispose();
+            bed.dataModel.dispose();
+        }
     });
 
     it('reserves outer border clearance only on the first and final lines of wrapped text', () => {

@@ -24,6 +24,7 @@ import type {
     IDrawings,
     ILists,
     IParagraph,
+    IParagraphBorder,
     IParagraphStyle,
     LocaleService,
     Nullable,
@@ -1015,20 +1016,32 @@ function _hasSameParagraphStyle(paragraph: IParagraph, adjacent: IParagraph | un
 function _applyAutomaticParagraphSpacing(
     paragraphStyle: IParagraphStyle,
     documentStyle: IDocumentStyle | undefined,
-    documentCompatibilityPolicy: IDocumentCompatibilityPolicy
+    documentCompatibilityPolicy: IDocumentCompatibilityPolicy,
+    viewModel?: DocumentViewModel,
+    paragraph?: IParagraph,
+    paragraphNode?: DataStreamTreeNode,
+    nextParagraphNode?: DataStreamTreeNode
 ): void {
     if ((!isTraditionalDocumentCompatibility(documentCompatibilityPolicy) && documentCompatibilityPolicy.mode !== 'modern') ||
         documentStyle?.compatibilityFlags?.doNotUseHTMLParagraphAutoSpacing === BooleanNumber.TRUE) {
         return;
     }
 
-    // Word's HTML automatic paragraph spacing is independent of the text's font size.
+    // Word's HTML automatic paragraph spacing is independent of the text's font size. Between two items of the
+    // same list, as between two <li> of a web page, Word leaves it out on both sides; fixed spacing stays
+    // (measured in Word 365: corpus/mosaico/autospaziatura).
     const automaticSpacing = { v: ptToPixel(14) };
+    const listId = paragraph?.bullet?.listId;
+    const sameList = (neighbour: IParagraph | undefined) => listId != null && neighbour?.bullet?.listId === listId;
     if (paragraphStyle.beforeAutoSpacing === BooleanNumber.TRUE) {
-        paragraphStyle.spaceAbove = automaticSpacing;
+        const previous = paragraphNode && viewModel ? viewModel.getParagraph(paragraphNode.startIndex - 1) : undefined;
+        paragraphStyle.spaceAbove = sameList(previous) ? { v: 0 } : automaticSpacing;
     }
     if (paragraphStyle.afterAutoSpacing === BooleanNumber.TRUE) {
-        paragraphStyle.spaceBelow = automaticSpacing;
+        const next = nextParagraphNode && viewModel && paragraphNode && nextParagraphNode.startIndex === paragraphNode.endIndex + 1
+            ? viewModel.getParagraph(nextParagraphNode.endIndex)
+            : undefined;
+        paragraphStyle.spaceBelow = sameList(next) ? { v: 0 } : automaticSpacing;
     }
 }
 
@@ -1137,13 +1150,17 @@ function _getParagraphBorderSpacing(
     const matchingPreviousBorder = previousParagraphStyle &&
         hasSameParagraphBorderSet(previousParagraphStyle, resolvedParagraphStyle);
     const topBorder = matchingPreviousBorder ? borderBetween : borderTop;
-    const topBorderClearance = topBorder && getDocumentBorderWidth(topBorder) > 0
-        ? Math.max(0, topBorder.padding ?? 0) + (matchingPreviousBorder ? 0 : getDocumentBorderWidth(topBorder))
+    // A border Word does not draw (w:val="none") still keeps its distance from the text, as web content pasted
+    // into Word has it (corpus/mosaico/bordi-vuoti): it takes room like a visible one, without a line.
+    const takesRoom = (border: IParagraphBorder | undefined) =>
+        border != null && (getDocumentBorderWidth(border) > 0 || (border.padding ?? 0) > 0);
+    const topBorderClearance = takesRoom(topBorder)
+        ? Math.max(0, topBorder!.padding ?? 0) + (matchingPreviousBorder ? 0 : getDocumentBorderWidth(topBorder))
         : 0;
     return {
         borderTopSpace: traditionalBorders ? topBorderClearance : undefined,
-        borderBottomSpace: traditionalBorders && bottomBorder && getDocumentBorderWidth(bottomBorder) > 0
-            ? Math.max(0, bottomBorder.padding ?? 0) + getDocumentBorderWidth(bottomBorder)
+        borderBottomSpace: traditionalBorders && takesRoom(bottomBorder)
+            ? Math.max(0, bottomBorder!.padding ?? 0) + getDocumentBorderWidth(bottomBorder)
             : undefined,
     };
 }
@@ -1200,7 +1217,7 @@ function _prepareLineBreaking(
         paragraph.styleId,
         documentSnapshot?.lists
     );
-    _applyAutomaticParagraphSpacing(resolvedParagraphStyle, documentStyle, documentCompatibilityPolicy);
+    _applyAutomaticParagraphSpacing(resolvedParagraphStyle, documentStyle, documentCompatibilityPolicy, viewModel, paragraph, paragraphNode, nextParagraphNode);
     _applyContextualParagraphSpacing(viewModel, paragraph, paragraphNode, nextParagraphNode, resolvedParagraphStyle, documentCompatibilityPolicy);
     const borderSpacing = _getParagraphBorderSpacing(viewModel, paragraphNode, nextParagraphNode, resolvedParagraphStyle, documentCompatibilityPolicy);
 
