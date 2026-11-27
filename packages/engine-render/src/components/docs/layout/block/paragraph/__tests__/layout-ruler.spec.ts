@@ -177,6 +177,60 @@ describe('layout-ruler', () => {
         }
     });
 
+    it('puts only whole words in the narrow room a picture leaves before the margin, as Word does', () => {
+        // Latin words of 5 glyphs, 40 wide; a picture from 120 to 270 of a page 300 wide: the room after it is 30
+        // wide, less than a word. Word leaves it empty rather than splitting a word across it (sonda
+        // vi-quadrato-stretto of the independent verification).
+        const words = Array.from({ length: 40 }, (_, index) => `w${String(index).padStart(4, '0')}`).join(' ');
+        const content = `${DataStreamTreeTokenType.CUSTOM_BLOCK}\r${words}`;
+        const bed = createParagraphLayoutTestBed(content, {
+            documentStyle: {
+                documentFlavor: DocumentFlavor.TRADITIONAL,
+                pageSize: { width: 300, height: 800 },
+                marginLeft: 0,
+                marginRight: 0,
+                marginTop: 0,
+                marginBottom: 0,
+            },
+            body: {
+                paragraphs: [{ startIndex: 1, paragraphId: 'anchor' }, { startIndex: content.length, paragraphId: 'text' }],
+                customBlocks: [{ startIndex: 0, blockId: 'float' }],
+            },
+            drawings: {
+                float: {
+                    drawingId: 'float',
+                    layoutType: PositionedObjectLayoutType.WRAP_SQUARE,
+                    wrapText: WrapTextType.BOTH_SIDES,
+                    behindDoc: BooleanNumber.FALSE,
+                    distL: 0,
+                    distR: 0,
+                    distT: 0,
+                    distB: 0,
+                    docTransform: {
+                        size: { width: 150, height: 90 },
+                        positionH: { relativeFrom: ObjectRelativeFromH.PAGE, posOffset: 120 },
+                        positionV: { relativeFrom: ObjectRelativeFromV.PAGE, posOffset: 0 },
+                        angle: 0,
+                    },
+                },
+            },
+        });
+        const skeleton = DocumentSkeleton.create(bed.viewModel, bed.ctx.docsConfig.localeService);
+        try {
+            skeleton.calculate();
+            const lines = skeleton.getSkeletonData()!.pages.flatMap((page) => page.sections.flatMap((section) => section.columns.flatMap((column) => column.lines)));
+            // every word whole in one divide, and all of them laid out
+            const pieces = lines.flatMap((line) => line.divides.map((divide) => divide.glyphGroup.map((glyph) => glyph.content).join('')))
+                .flatMap((text) => text.split(/\s+/).filter((piece) => piece.startsWith('w') || /^\d/.test(piece)));
+            expect(pieces.every((piece) => /^w\d{4}$/.test(piece))).toBe(true);
+            expect(pieces).toHaveLength(40);
+        } finally {
+            skeleton.dispose();
+            bed.viewModel.dispose();
+            bed.dataModel.dispose();
+        }
+    });
+
     it('does not skip a fixed tab stop after preceding text crosses it', () => {
         const tab = createGlyph(DataStreamTreeTokenType.TAB, 36);
         tab.glyphType = GlyphType.TAB;

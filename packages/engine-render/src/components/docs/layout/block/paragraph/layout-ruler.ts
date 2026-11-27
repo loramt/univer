@@ -747,7 +747,11 @@ function _appendOverflowingGlyphs(
         if (
             isTraditionalDocumentCompatibility(paragraphConfig.documentCompatibilityPolicy!) &&
             wordWidth < column.width &&
-            calculateLineTopByDrawings(line.lineHeight, line.top, lastPage, null, null, column.left, column.width, section.top, wordWidth - 0.001) > line.top
+            // Word puts only whole words in the room a wrapped drawing leaves: a word wider than this room but
+            // not than another divide of the line goes to the next line, never split across it (Word 365, sonde
+            // vi-quadrato-stretto and vi-ritagli of the independent verification).
+            (line.divides.some((other) => other !== divide && other.width + 0.001 >= wordWidth) ||
+                calculateLineTopByDrawings(line.lineHeight, line.top, lastPage, null, null, column.left, column.width, section.top, wordWidth - 0.001) > line.top)
         ) {
             // Preserve the shaped word when the obstacle, rather than the
             // column, is too narrow. Normal long-word breaking still applies.
