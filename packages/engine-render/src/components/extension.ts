@@ -29,6 +29,8 @@ export interface IExtensionConfig {
     centerPoint?: Vector2;
     alignOffset?: Vector2;
     renderConfig?: IDocumentLayoutRenderConfig;
+    /** docs: the x of the left edge of the page being drawn, in the coordinates of spanPointWithFont. */
+    pageLeft?: number;
 }
 
 export interface IDrawInfo {

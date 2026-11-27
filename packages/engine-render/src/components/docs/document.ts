@@ -317,6 +317,10 @@ export class Documents extends DocComponent {
 
     private _drawLiquid: Nullable<Liquid> = new Liquid();
 
+    /** The x of the left edge of the page being drawn (tab leaders are aligned to it, as in Word). */
+
+    private _pageLeft: number | undefined;
+
     private _inactiveAreaOpacity = 1;
     private readonly _pageFieldContext?: IDocumentsConfig['pageFieldContext'];
 
@@ -491,6 +495,7 @@ export class Documents extends DocComponent {
 
         for (let i = 0, len = pages.length; i < len; i++) {
             const page = pages[i];
+            this._pageLeft = this._drawLiquid?.x;
             const firstPageInSection = !renderedSections.has(page.sectionId);
             renderedSections.add(page.sectionId);
             const pageBorders = (page.sectionId == null ? undefined : sectionBorders.get(page.sectionId)) ?? dataModel?.documentStyle.pageBorders;
@@ -1058,6 +1063,7 @@ export class Documents extends DocComponent {
                 originTranslate,
                 spanStartPoint,
                 spanPointWithFont,
+                pageLeft: this._pageLeft,
                 centerPoint,
                 alignOffset,
                 renderConfig,

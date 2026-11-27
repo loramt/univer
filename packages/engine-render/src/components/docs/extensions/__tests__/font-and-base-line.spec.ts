@@ -344,6 +344,45 @@ describe('docs font and baseline extension', () => {
         expect(SeparatorContext.restore).toHaveBeenCalledOnce();
     });
 
+    it.each([
+        // a dot of a quarter of an em at 10 pt: 83 pixels per em at 600 dpi, 21 pixels (3.36 px) apart
+        { em: 0.25, step: 3.36, count: 14, first: 3, last: 16 },
+        // half an em, measured 1/64 px short at the text size: still 42 pixels at 600 dpi, as in Word
+        { em: 0.5 - 1 / 64 / (10 * 4 / 3), step: 6.72, count: 6, first: 2, last: 7 },
+    ])('puts tab leader characters of $em em on Word\'s grid from the left edge of the page', ({ em, step, count, first, last }) => {
+        // Word 365: the characters of a leader are one character width apart (whole pixels at 600 dpi, at the size
+        // Word draws), on a grid from the left edge of the page, from the first grid line after the tab's start to
+        // the last one whose character ends before the tab's end.
+        const extension = new FontAndBaseLine();
+        const TestContext = createContext();
+        // the canvas measures exactly at large sizes, a little short at the text size
+        TestContext.measureText = vi.fn(() => {
+            const px = Number(/([\d.]+)px/.exec(TestContext.font)?.[1] ?? 0);
+            const exact = em < 0.3 ? 0.25 : 0.5;
+            return { width: px > 100 ? px * exact : px * em };
+        }) as any;
+        extension.extensionOffset = {
+            spanPointWithFont: Vector2.create(110, 20),
+            spanStartPoint: Vector2.create(110, 10),
+            centerPoint: Vector2.create(25, 8),
+            pageLeft: 100,
+            renderConfig: { vertexAngle: 0, centerAngle: 0 },
+        };
+
+        extension.draw(TestContext, DEFAULT_SCALE, createGlyph('\t', {
+            glyphType: GlyphType.TAB,
+            width: 50,
+            tabLeader: 2,
+            fontStyle: { fontString: '13.333333333333334px Arial', fontSize: 10, originFontSize: 10, fontFamily: 'Arial', fontCache: '' },
+        } as any));
+
+        const xs = TestContext.fillText.mock.calls.map((call: unknown[]) => Number(call[1]) - 100);
+        expect(xs.length).toBe(count);
+        expect(xs[0]).toBeCloseTo(first * step);
+        expect(xs[count - 1]).toBeCloseTo(last * step);
+        expect(TestContext.fillText.mock.calls.every((call: unknown[]) => call[0] === '.')).toBe(true);
+    });
+
     it('does not paint positioned tabs when no leader is configured', () => {
         const extension = new FontAndBaseLine();
         const TestContext = createContext();

@@ -40,12 +40,20 @@ const DOC_EXTENSION_Z_INDEX = 20;
 /**
  * Singleton
  */
+
+/** 1/600 inch in canvas pixels (96 per inch): the resolution Word lays tab leaders out at. */
+const LEADER_GRID_PX = 96 / 600;
+/** How much larger leader characters are measured. */
+const LEADER_MEASURE_SCALE = 64;
+
 export class FontAndBaseLine extends docExtension {
     override uKey = UNIQUE_KEY;
 
     override Z_INDEX = DOC_EXTENSION_Z_INDEX;
 
     private _preFontColor = '';
+
+    private readonly _leaderEms = new Map<string, number | undefined>();
 
     /**
      * ctx.font = val;  then ctx.font is not exactly the same as val
@@ -433,9 +441,25 @@ export class FontAndBaseLine extends docExtension {
                 const leader = this._getTabLeaderCharacter(glyph.tabLeader);
                 if (leader) {
                     const leaderWidth = ctx.measureText(leader).width;
-                    const count = leaderWidth > 0 ? Math.floor(width / leaderWidth) : 0;
-                    if (count > 0) {
-                        this._paintText(ctx, glyph, leader.repeat(count), spanPointWithFont.x, spanPointWithFont.y);
+                    const { pageLeft } = this.extensionOffset;
+                    const fontSize = glyph.fontStyle?.fontSize ?? glyph.ts?.fs;
+                    if (pageLeft != null && leaderWidth > 0 && fontSize != null && fontSize > 0) {
+                        // Word puts the leader characters on a grid from the left edge of the page, one character
+                        // width apart, from the first grid line after the text before the tab to the last one whose
+                        // character still ends before the text after it. The width is the character's at the size
+                        // Word draws (whole pixels per em at 600 dpi), in whole pixels at 600 dpi (Word 365).
+                        const pixelsPerEm = Math.round(fontSize * 600 / 72);
+                        const em = this._leaderEm(ctx, leader) ?? leaderWidth / (fontSize * 4 / 3);
+                        const step = Math.max(1, Math.floor(em * pixelsPerEm + 0.5 + 1e-6)) * LEADER_GRID_PX;
+                        const start = spanPointWithFont.x - pageLeft;
+                        for (let x = Math.ceil(start / step - 1e-6) * step; x + step <= start + width + 1e-6; x += step) {
+                            this._paintText(ctx, glyph, leader, pageLeft + x, spanPointWithFont.y);
+                        }
+                    } else {
+                        const count = leaderWidth > 0 ? Math.floor(width / leaderWidth) : 0;
+                        if (count > 0) {
+                            this._paintText(ctx, glyph, leader.repeat(count), spanPointWithFont.x, spanPointWithFont.y);
+                        }
                     }
                 }
             }
@@ -643,6 +667,28 @@ export class FontAndBaseLine extends docExtension {
         }
     }
 
+    /**
+     * The width of a leader character in em, measured at a large size: canvas advances are rounded at text sizes
+     * (to 1/64 px), enough to put a character of exactly half an em on the wrong side of a pixel.
+     */
+    private _leaderEm(ctx: UniverRenderingContext, leader: string): number | undefined {
+        const font = ctx.font;
+        const key = `${font}|${leader}`;
+        if (this._leaderEms.has(key)) {
+            return this._leaderEms.get(key);
+        }
+        const large = scaleCanvasFontSize(font, LEADER_MEASURE_SCALE);
+        let em: number | undefined;
+        if (large) {
+            ctx.font = large.font;
+            const width = ctx.measureText(leader).width;
+            ctx.font = font;
+            em = width > 0 ? width / (large.px * LEADER_MEASURE_SCALE) : undefined;
+        }
+        this._leaderEms.set(key, em);
+        return em;
+    }
+
     private _getTabLeaderCharacter(leader: TabStopLeader): string {
         switch (leader) {
             case 2:
@@ -652,7 +698,8 @@ export class FontAndBaseLine extends docExtension {
             case 4:
                 return '_';
             case 5:
-                return '\u2022';
+                // Word draws a heavy leader with underscores, as the underscore leader (Word 365).
+                return '_';
             case 6:
                 return '\u00B7';
             default:
@@ -669,6 +716,22 @@ function scaleCanvasFontPixelSize(font: string, scale: number): string {
     return font.replace(/(^|\s)(\d+(?:\.\d+)?)px(?=\s)/, (_match, prefix: string, size: string) => (
         `${prefix}${Number(size) * scale}px`
     ));
+}
+
+/** A canvas font scaled, with the size in CSS px of the font before scaling (sizes in px or pt). */
+function scaleCanvasFontSize(font: string, scale: number): { font: string; px: number } | undefined {
+    const match = /(^|\s)(\d+(?:\.\d+)?)(px|pt)(?=\s)/.exec(font);
+    if (!match) {
+        return undefined;
+    }
+    const size = Number(match[2]);
+    if (!Number.isFinite(size) || size <= 0) {
+        return undefined;
+    }
+    return {
+        font: `${font.slice(0, match.index)}${match[1]}${size * scale}${match[3]}${font.slice(match.index + match[0].length)}`,
+        px: match[3] === 'pt' ? size * 4 / 3 : size,
+    };
 }
 
 function canvasFontPixelSize(font: string): number | undefined {
