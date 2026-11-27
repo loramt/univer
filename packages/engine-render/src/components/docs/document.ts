@@ -43,6 +43,7 @@ import type {
     IDocumentSkeletonColumnGroup,
     IDocumentSkeletonColumnGroupColumn,
     IDocumentSkeletonDivide,
+    IDocumentSkeletonDrawing,
     IDocumentSkeletonGlyph,
     IDocumentSkeletonLine,
     IDocumentSkeletonPage,
@@ -96,6 +97,7 @@ import {
     getDocsTableViewportLeft,
     hasDocsTableHorizontalViewport,
 } from './table-render-viewport';
+import { DocTextBoxPainter, drawDocTextBoxShape, getDocTextBox, getDocTextBoxFrame } from './text-box';
 import { DocumentEditArea } from './view-model/document-view-model';
 
 const DEFAULT_BORDER_COLOR: ITableCellBorder = {
@@ -322,7 +324,10 @@ export class Documents extends DocComponent {
     private _pageLeft: number | undefined;
 
     private _inactiveAreaOpacity = 1;
-    private readonly _pageFieldContext?: IDocumentsConfig['pageFieldContext'];
+    private _pageFieldContext?: IDocumentsConfig['pageFieldContext'];
+
+    /** The documents of the text boxes drawn on the pages (drawings with a content of their own). */
+    private _textBoxes?: DocTextBoxPainter;
 
     constructor(oKey: string, documentSkeleton?: DocumentSkeleton, config?: IDocumentsConfig) {
         super(oKey, documentSkeleton, config);
@@ -337,7 +342,14 @@ export class Documents extends DocComponent {
         return new Documents(oKey, documentSkeleton, config);
     }
 
+    /** The page fields of an embedded document show the numbers of the page of its host it is drawn on. */
+    setPageFieldContext(context: IDocumentsConfig['pageFieldContext']): void {
+        this._pageFieldContext = context;
+    }
+
     override dispose() {
+        this._textBoxes?.dispose();
+        this._textBoxes = undefined;
         this._glyphPaintSink = undefined;
         this._glyphPaints = [];
         super.dispose();
@@ -496,6 +508,8 @@ export class Documents extends DocComponent {
         for (let i = 0, len = pages.length; i < len; i++) {
             const page = pages[i];
             this._pageLeft = this._drawLiquid?.x;
+            const pageOriginX = this._drawLiquid?.x ?? 0;
+            const pageOriginY = this._drawLiquid?.y ?? 0;
             const firstPageInSection = !renderedSections.has(page.sectionId);
             renderedSections.add(page.sectionId);
             const pageBorders = (page.sectionId == null ? undefined : sectionBorders.get(page.sectionId)) ?? dataModel?.documentStyle.pageBorders;
@@ -565,6 +579,9 @@ export class Documents extends DocComponent {
             if (clipsToPhysicalPage && pageBorders?.zOrder === 'back') {
                 drawPageBorders(ctx, page, pageBorders, pageLeft, pageTop, firstPageInSection);
             }
+
+            // text boxes behind the text: their shape and content under everything else of the page
+            this._drawTextBoxes(ctx, page, pageOriginX, pageOriginY, pages.length, true);
 
             if (skeTables.size > 0) {
                 ctx.save();
@@ -706,6 +723,8 @@ export class Documents extends DocComponent {
                 );
             }
 
+            this._drawTextBoxes(ctx, page, pageOriginX, pageOriginY, pages.length, false);
+
             if (clipsToPhysicalPage) {
                 if (pageBorders?.zOrder !== 'back') {
                     drawPageBorders(ctx, page, pageBorders, pageLeft, pageTop, firstPageInSection);
@@ -730,6 +749,52 @@ export class Documents extends DocComponent {
             pageTop += y;
         }
         this._glyphPaintSink?.(this._glyphPaints);
+    }
+
+    /**
+     * The text boxes of a page, its header and its footer (drawings with a content of their own): the shape, then
+     * the content laid out in the frame. Those behind the text are drawn first, the others over the page.
+     */
+    private _drawTextBoxes(
+        ctx: UniverRenderingContext,
+        page: IDocumentSkeletonPage,
+        pageOriginX: number,
+        pageOriginY: number,
+        pageCount: number,
+        behind: boolean
+    ): void {
+        const skeleton = this.getSkeleton();
+        const skeletonData = skeleton?.getSkeletonData();
+        if (!skeleton || !skeletonData) {
+            return;
+        }
+        const header = page.headerId ? skeletonData.skeHeaders.get(page.headerId)?.get(page.headerLayoutKey ?? page.pageWidth) : undefined;
+        const footer = page.footerId ? skeletonData.skeFooters.get(page.footerId)?.get(page.footerLayoutKey ?? page.pageWidth) : undefined;
+        const segments: Array<[{ skeDrawings: Map<string, IDocumentSkeletonDrawing> }, number]> = [];
+        if (header) {
+            segments.push([header, header.marginTop]);
+        }
+        if (footer) {
+            segments.push([footer, page.pageHeight - footer.height - footer.marginBottom]);
+        }
+        segments.push([page, page.marginTop]);
+        for (const [segment, segmentTop] of segments) {
+            for (const drawing of segment.skeDrawings?.values() ?? []) {
+                const textBox = getDocTextBox(drawing.drawingOrigin);
+                if (!textBox || (drawing.drawingOrigin.behindDoc === BooleanNumber.TRUE) !== behind) {
+                    continue;
+                }
+                const frame = getDocTextBoxFrame(drawing, segmentTop, page.marginLeft, page);
+                const placed = { ...frame, left: frame.left + pageOriginX, top: frame.top + pageOriginY };
+                drawDocTextBoxShape(ctx, textBox.shape, placed);
+                this._textBoxes ??= new DocTextBoxPainter((key, child) => new Documents(key, child, { pageMarginLeft: 0, pageMarginTop: 0 }));
+                this._textBoxes.draw(ctx, drawing.drawingId, textBox, placed, skeleton, {
+                    pageNumber: page.pageNumber,
+                    pageNumberFormat: page.pageNumberFormat,
+                    pageCount,
+                });
+            }
+        }
     }
 
     private _drawBodySections(

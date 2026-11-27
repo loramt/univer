@@ -1321,6 +1321,11 @@ export class DocumentSkeleton extends Skeleton {
         return this._docViewModel;
     }
 
+    /** The locale service of the skeleton, for the documents laid out inside it (text boxes). */
+    getLocaleService(): LocaleService {
+        return this._localeService;
+    }
+
     /**
      * Layout the document.
      * PS: This method has significant impact on performance.
