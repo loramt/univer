@@ -167,6 +167,24 @@ function bitfieldsEmf(): Uint8Array {
     return new Uint8Array(records.flat());
 }
 
+/** A dotted line with a pattern of 2 x 2 pixels of 32 bits with the masks of their channels, as Excel writes it. */
+function dottedColorEmf(): Uint8Array {
+    const records: number[][] = [];
+    const u32 = (value: number) => [value & 0xFF, (value >>> 8) & 0xFF, (value >>> 16) & 0xFF, (value >>> 24) & 0xFF];
+    const i32 = (value: number) => u32(value >>> 0);
+    const record = (type: number, body: number[]) => records.push([...u32(type), ...u32(8 + body.length), ...body]);
+    record(1, [...i32(0), ...i32(0), ...i32(99), ...i32(49), ...i32(0), ...i32(0), ...i32(2646), ...i32(1323), ...u32(0x464D4520), ...u32(0x10000), ...u32(0), ...u32(0), ...u32(0), ...u32(0), ...u32(0), ...u32(0), ...i32(1000), ...i32(500), ...i32(265), ...i32(132), ...u32(0), ...u32(0), ...u32(0), ...u32(264583), ...u32(132292)]);
+    const info = [...u32(40), ...i32(2), ...i32(2), 1, 0, 32, 0, ...u32(3), ...u32(16), ...i32(0), ...i32(0), ...u32(0), ...u32(0)];
+    const masks = [...u32(0x00FF0000), ...u32(0x0000FF00), ...u32(0x000000FF)];
+    // from the bottom row: white black, then black white
+    const pixels = [...u32(0xFFFFFF), ...u32(0), ...u32(0), ...u32(0xFFFFFF)];
+    record(94, [...u32(1), ...u32(0), ...u32(32), ...u32(52), ...u32(84), ...u32(16), ...info, ...masks, ...pixels]);
+    record(37, u32(1));
+    record(76, [...i32(0), ...i32(0), ...i32(3), ...i32(0), ...i32(0), ...i32(10), ...i32(4), ...i32(1), ...u32(0x00F00021), ...i32(0), ...i32(0), ...new Array(24).fill(0), ...u32(0), ...u32(0), ...u32(0), ...u32(0), ...u32(0), ...u32(0)]);
+    record(14, [...u32(0), ...u32(16), ...u32(20)]);
+    return new Uint8Array(records.flat());
+}
+
 function recordingContext() {
     const calls: Array<{ op: string; args: unknown[]; fillStyle?: string; strokeStyle?: string; font?: string; lineWidth?: number }> = [];
     const ctx: Record<string, unknown> = { font: '', fillStyle: '', strokeStyle: '', lineWidth: 1 };
@@ -224,6 +242,15 @@ describe('Windows metafiles', () => {
         const scale = 100 / (emf.frame.right - emf.frame.left);
         expect(dots[1].args[0]).toBeCloseTo(1 * scale);
         expect(dots[1].args[2]).toBeCloseTo(scale);
+    });
+
+    it('copies a pattern brush in colour pixel by pixel, as the dotted borders Excel writes in 32 bits', () => {
+        const emf = parseEmf(dottedColorEmf())!;
+        const { ctx, calls } = recordingContext();
+        drawEmf(ctx, emf, { left: 0, top: 0, width: 100, height: 50 });
+        // the row 10 of the device is the first row of the pattern (black white)
+        expect(calls.filter((call) => call.op === 'fillRect').map((call) => call.fillStyle))
+            .toEqual(['rgb(0,0,0)', 'rgb(255,255,255)', 'rgb(0,0,0)', 'rgb(255,255,255)']);
     });
 
     it('writes the text of a turned font along its turned baseline', () => {

@@ -111,8 +111,11 @@ export function parseEmf(bytes: Uint8Array): IMetafile | undefined {
 }
 
 interface IPen { color: string; width: number; style: number; cosmetic: boolean }
-/** The pattern of a brush (EMR_CREATEDIBPATTERNBRUSHPT, EMR_CREATEMONOBRUSH): bits from the top row, 0 or 1. */
-interface IBrushPattern { width: number; height: number; bits: Uint8Array; colors: [string, string] | null }
+/**
+ * The pattern of a brush (EMR_CREATEDIBPATTERNBRUSHPT, EMR_CREATEMONOBRUSH), from the top row: the bits (0 or 1) of a
+ * monochrome one with its two colours, or the colour of each pixel.
+ */
+interface IBrushPattern { width: number; height: number; bits: Uint8Array; colors: [string, string] | null; pixels?: string[] }
 interface IBrush { color: string | null; pattern?: IBrushPattern }
 interface IFont { height: number; weight: number; italic: boolean; underline: boolean; strikeOut: boolean; escapement: number; face: string }
 type Rect = [number, number, number, number];
@@ -492,7 +495,39 @@ export function drawEmf(ctx: UniverRenderingContext, emf: IMetafile, frame: IMet
         const width = i32(bmi + 4);
         const height = i32(bmi + 8);
         const rows = Math.abs(height);
-        if (width <= 0 || rows === 0 || width > 64 || rows > 64 || view.getUint16(bmi + 14, true) !== 1 || u32(bmi + 16) !== 0) {
+        const bitCount = view.getUint16(bmi + 14, true);
+        const compression = u32(bmi + 16);
+        if (width <= 0 || rows === 0 || width > 64 || rows > 64) {
+            return undefined;
+        }
+        if (bitCount === 24 || bitCount === 32) {
+            // a pattern in colour (Excel writes its dotted borders with 8 x 8 pixels of 32 bits and the masks of their
+            // channels): the colour of each pixel
+            const fields = compression === 3;
+            if (compression !== 0 && !(fields && bitCount === 32)) return undefined;
+            const masks = fields ? [u32(bmi + u32(bmi)), u32(bmi + u32(bmi) + 4), u32(bmi + u32(bmi) + 8)] : [];
+            const channel = (value: number, mask: number) => {
+                if (!mask) return 0;
+                let shift = 0;
+                while (((mask >>> shift) & 1) === 0 && shift < 32) shift++;
+                return Math.round(((value & mask) >>> shift) * 255 / (mask >>> shift));
+            };
+            const stride24 = Math.ceil((width * bitCount) / 32) * 4;
+            if (bits + stride24 * rows > view.byteLength) return undefined;
+            const pixels: string[] = [];
+            for (let row = 0; row < rows; row++) {
+                const source = bits + (height > 0 ? rows - 1 - row : row) * stride24;
+                for (let column = 0; column < width; column++) {
+                    const at = source + column * (bitCount / 8);
+                    const rgb = fields
+                        ? [channel(u32(at), masks[0]), channel(u32(at), masks[1]), channel(u32(at), masks[2])]
+                        : [view.getUint8(at + 2), view.getUint8(at + 1), view.getUint8(at)];
+                    pixels.push(`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`);
+                }
+            }
+            return { width, height: rows, bits: new Uint8Array(0), colors: null, pixels };
+        }
+        if (bitCount !== 1 || compression !== 0) {
             return undefined;
         }
         const stride = Math.ceil(width / 32) * 4;
@@ -533,12 +568,16 @@ export function drawEmf(ctx: UniverRenderingContext, emf: IMetafile, frame: IMet
             for (let row = top; row < bottom; row++) {
                 const line = ((row % pattern.height) + pattern.height) % pattern.height;
                 let start = left;
+                // the colour of a pixel of the device: its pixel of the pattern, from the origin of the device
+                const colorAt = (value: number) => {
+                    const index = line * pattern.width + (((value % pattern.width) + pattern.width) % pattern.width);
+                    return pattern.pixels ? pattern.pixels[index] : colors[pattern.bits[index]];
+                };
                 for (let column = left; column <= right; column++) {
-                    const at = (value: number) => pattern.bits[line * pattern.width + (((value % pattern.width) + pattern.width) % pattern.width)];
-                    if (column < right && at(column) === at(start)) continue;
+                    if (column < right && colorAt(column) === colorAt(start)) continue;
                     const [px, py] = point(start, row, toPage);
                     const [qx, qy] = point(column, row + 1, toPage);
-                    ctx.fillStyle = colors[at(start)];
+                    ctx.fillStyle = colorAt(start);
                     ctx.fillRect(Math.min(px, qx), Math.min(py, qy), Math.abs(qx - px), Math.abs(qy - py));
                     start = column;
                 }
