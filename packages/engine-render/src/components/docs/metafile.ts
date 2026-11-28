@@ -440,16 +440,18 @@ export function drawEmf(ctx: UniverRenderingContext, emf: IMetafile, frame: IMet
             const vertical = state.textAlign & 24;
             const startX = horizontal === 6 ? x0 - total / 2 : horizontal === 2 ? x0 - total : x0;
             let x = startX;
-            const angle = ((font.escapement || 0) / 10) * Math.PI / 180;
-            if (angle !== 0) {
-                // a font with an escapement writes along a baseline turned by it, counter-clockwise, around the
-                // reference point (the text of Excel turned in a cell)
+            const escapement = ((font.escapement || 0) / 10) * Math.PI / 180;
+            // the direction the transform gives the baseline on the page: a world transform turned by Excel for the
+            // titles of the axes of its charts ([0 -1 1 0]), and the turn of a font with an escapement
+            const turn = Math.atan2(m[1], m[0]);
+            if (escapement !== 0 || Math.abs(turn) > 1e-6) {
+                // the glyphs go along the turned baseline from the reference point, each turned with it
                 const [rx, ry] = point(x0, y0, m);
                 const scaleX = Math.hypot(m[0], m[1]);
                 const lift = vertical === 24 ? 0 : vertical === 8 ? -descent : ascent;
                 ctx.save();
                 ctx.translate(rx, ry);
-                ctx.rotate(-angle);
+                ctx.rotate(turn - escapement);
                 for (let i = 0; i < count; i++) {
                     ctx.fillText(string[i], (x - x0) * scaleX, lift);
                     x += advances.length === count ? advances[i] : ctx.measureText(string[i]).width / Math.max(1e-6, scaleX);
@@ -580,9 +582,20 @@ export function drawEmf(ctx: UniverRenderingContext, emf: IMetafile, frame: IMet
         const bitCount = view.getUint16(bmi + 14, true);
         const compression = u32(bmi + 16);
         const headerSize = u32(bmi);
-        if (width <= 0 || height === 0 || compression !== 0 || ![1, 4, 8, 24, 32].includes(bitCount) || typeof document === 'undefined') {
+        // BI_RGB, and BI_BITFIELDS for 16 and 32 bits (the masks of each channel after the header, as GDI+ writes)
+        const fields = compression === 3 && (bitCount === 16 || bitCount === 32);
+        if (width <= 0 || height === 0 || (compression !== 0 && !fields) || ![1, 4, 8, 16, 24, 32].includes(bitCount) ||
+            (bitCount === 16 && !fields) || typeof document === 'undefined') {
             return;
         }
+        const masks = fields ? [u32(bmi + headerSize), u32(bmi + headerSize + 4), u32(bmi + headerSize + 8)] : [];
+        const channel = (value: number, mask: number) => {
+            if (!mask) return 0;
+            let shift = 0;
+            while (((mask >>> shift) & 1) === 0 && shift < 32) shift++;
+            const top = mask >>> shift;
+            return Math.round(((value & mask) >>> shift) * 255 / top);
+        };
         const rows = Math.abs(height);
         const stride = Math.ceil((width * bitCount) / 32) * 4;
         if (bits + stride * rows > view.byteLength) {
@@ -605,7 +618,10 @@ export function drawEmf(ctx: UniverRenderingContext, emf: IMetafile, frame: IMet
             const source = bits + (height > 0 ? rows - 1 - row : row) * stride;
             for (let column = 0; column < width; column++) {
                 let rgb: [number, number, number];
-                if (bitCount === 24 || bitCount === 32) {
+                if (fields) {
+                    const value = bitCount === 32 ? u32(source + column * 4) : view.getUint16(source + column * 2, true);
+                    rgb = [channel(value, masks[0]), channel(value, masks[1]), channel(value, masks[2])];
+                } else if (bitCount === 24 || bitCount === 32) {
                     const at = source + column * (bitCount / 8);
                     rgb = [view.getUint8(at + 2), view.getUint8(at + 1), view.getUint8(at)];
                 } else {

@@ -136,6 +136,37 @@ function dottedEmf(): Uint8Array {
     return new Uint8Array(records.flat());
 }
 
+/** The table of excelLikeEmf drawn under a world transform turned by 90 degrees, as Excel writes the titles of axes. */
+function turnedWorldEmf(): Uint8Array {
+    const bytes = excelLikeEmf();
+    const records: number[][] = [];
+    const u32 = (value: number) => [value & 0xFF, (value >>> 8) & 0xFF, (value >>> 16) & 0xFF, (value >>> 24) & 0xFF];
+    const f32 = (value: number) => Array.from(new Uint8Array(new Float32Array([value]).buffer));
+    // EMR_MODIFYWORLDTRANSFORM, MWT_SET (4): x' = y, y' = -x, around the reference point of the text
+    records.push([...u32(36), ...u32(36), ...f32(0), ...f32(-1), ...f32(1), ...f32(0), ...f32(0), ...f32(50), ...u32(4)]);
+    const header = bytes.subarray(0, new DataView(bytes.buffer).getUint32(4, true));
+    return new Uint8Array([...header, ...records.flat(), ...bytes.subarray(header.length)]);
+}
+
+/** A bitmap of 2 x 1 pixels of 32 bits with the masks of its channels (BI_BITFIELDS), copied with BitBlt. */
+function bitfieldsEmf(): Uint8Array {
+    const records: number[][] = [];
+    const u32 = (value: number) => [value & 0xFF, (value >>> 8) & 0xFF, (value >>> 16) & 0xFF, (value >>> 24) & 0xFF];
+    const i32 = (value: number) => u32(value >>> 0);
+    const record = (type: number, body: number[]) => records.push([...u32(type), ...u32(8 + body.length), ...body]);
+    record(1, [...i32(0), ...i32(0), ...i32(99), ...i32(49), ...i32(0), ...i32(0), ...i32(2646), ...i32(1323), ...u32(0x464D4520), ...u32(0x10000), ...u32(0), ...u32(0), ...u32(0), ...u32(0), ...u32(0), ...u32(0), ...i32(1000), ...i32(500), ...i32(265), ...i32(132), ...u32(0), ...u32(0), ...u32(0), ...u32(264583), ...u32(132292)]);
+    // the header (40), the masks of red, green and blue (12), then the pixels: red, then blue
+    const info = [...u32(40), ...i32(2), ...i32(1), 1, 0, 32, 0, ...u32(3), ...u32(8), ...i32(0), ...i32(0), ...u32(0), ...u32(0)];
+    const masks = [...u32(0x00FF0000), ...u32(0x0000FF00), ...u32(0x000000FF)];
+    const pixels = [...u32(0x00FF0000), ...u32(0x000000FF)];
+    // EMR_BITBLT: bounds, destination, raster operation, source, transform, colour, usage, then the bitmap
+    const fixed = [...i32(0), ...i32(0), ...i32(1), ...i32(0), ...i32(10), ...i32(20), ...i32(2), ...i32(1), ...u32(0x00CC0020), ...i32(0), ...i32(0), ...new Array(24).fill(0), ...u32(0), ...u32(0)];
+    const offBmi = 8 + fixed.length + 16;
+    record(76, [...fixed, ...u32(offBmi), ...u32(52), ...u32(offBmi + 52), ...u32(8), ...info, ...masks, ...pixels]);
+    record(14, [...u32(0), ...u32(16), ...u32(20)]);
+    return new Uint8Array(records.flat());
+}
+
 function recordingContext() {
     const calls: Array<{ op: string; args: unknown[]; fillStyle?: string; strokeStyle?: string; font?: string; lineWidth?: number }> = [];
     const ctx: Record<string, unknown> = { font: '', fillStyle: '', strokeStyle: '', lineWidth: 1 };
@@ -209,6 +240,39 @@ describe('Windows metafiles', () => {
         expect(moved?.args[1]).toBeCloseTo(20 + 25 * scale);
         const glyphs = calls.filter((call) => call.op === 'fillText');
         expect(glyphs.map((call) => call.args[1])).toEqual([0, 9 * scale]);
+    });
+
+    it('turns the glyphs of a text drawn under a turned world transform, as the titles of the axes of Excel', () => {
+        // N10 of the fourth independent verification: the glyphs went along the turned baseline, each one upright
+        const emf = parseEmf(turnedWorldEmf())!;
+        const { ctx, calls } = recordingContext();
+        drawEmf(ctx, emf, { left: 10, top: 20, width: 200, height: 100 });
+        const turn = calls.find((call) => call.op === 'rotate');
+        expect(turn?.args[0]).toBeCloseTo(-Math.PI / 2);
+        expect(calls.filter((call) => call.op === 'fillText').map((call) => call.args[0])).toEqual(['A', 'b']);
+    });
+
+    it('draws a bitmap of 32 bits with the masks of its channels, copied with BitBlt', () => {
+        // N2 of the fourth independent verification: the bitmaps of GDI+ (BI_BITFIELDS) were left out without a word
+        const pixels: number[] = [];
+        const fake = {
+            width: 0,
+            height: 0,
+            getContext: () => ({
+                createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+                putImageData: (image: { data: Uint8ClampedArray }) => pixels.push(...image.data),
+            }),
+        };
+        const create = vi.spyOn(document, 'createElement').mockReturnValue(fake as unknown as HTMLElement);
+        try {
+            const emf = parseEmf(bitfieldsEmf())!;
+            const { ctx, calls } = recordingContext();
+            drawEmf(ctx, emf, { left: 0, top: 0, width: 100, height: 50 });
+            expect(pixels).toEqual([255, 0, 0, 255, 0, 0, 255, 255]);
+            expect(calls.some((call) => call.op === 'drawImage')).toBe(true);
+        } finally {
+            create.mockRestore();
+        }
     });
 
     it('fills a path of moves, Bézier curves and lines as one figure, as GDI traces it', () => {
