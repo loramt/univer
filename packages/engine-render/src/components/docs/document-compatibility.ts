@@ -300,6 +300,47 @@ const WORD_SCRIPT_1331_FAMILIES = new Set([
     '微软雅黑',
 ]);
 
+/**
+ * The faces of WORD_SCRIPT_1331_FAMILIES whose OS/2 ySuperscriptYOffset is below a quarter of the em, in units of
+ * 2048 (step 08-apici of the bench). Word keeps the OS/2 script size of a face only while that offset, rounded to half
+ * points, is at least a quarter of the font size, floored to half points; below, it sizes the scripts at three fifths
+ * (WORD_LEGACY_SCRIPT_RATIO). The probe apici-corpi of the bench (Word 365, every half point from 6 to 30 pt): Garamond
+ * at 12, 14, 16, 18, 18.5, 20 pt… has scripts of three fifths and at 6 to 11.5, 12.5, 13, 15… of 1331/2048, while
+ * Arial, Book Antiqua, Calibri Light, Century Gothic, Cambria and Georgia keep 1331/2048 at all 49 sizes, as the rule
+ * says (G1 of the eighth check).
+ */
+const WORD_SCRIPT_LOW_SUPERSCRIPT_OFFSETS = new Map([
+    ['arial black', 439],
+    ['book antiqua', 496],
+    ['bookman old style', 488],
+    ['bradley hand itc', 500],
+    ['cambria', 503],
+    ['cambria math', 503],
+    ['franklin gothic medium', 502],
+    ['french script mt', 215],
+    ['garamond', 469],
+    ['lucida console', 469],
+    ['lucida sans unicode', 496],
+    ['monotype corsiva', 493],
+    ['ms reference specialty', 0],
+    ['mv boli', 0],
+]);
+
+/** The size of Word's scripts in faces without valid script metrics, of the font size. */
+const WORD_LEGACY_SCRIPT_RATIO = 0.6;
+
+/** The script size of a face of WORD_SCRIPT_1331_FAMILIES at a font size, of the font size. */
+function getWord1331ScriptRatio(family: string, fontSize: number): number {
+    const offset = WORD_SCRIPT_LOW_SUPERSCRIPT_OFFSETS.get(family);
+    if (offset != null) {
+        const halfPoints = Math.round(fontSize * 2);
+        if (Math.round(halfPoints * offset / 2048) < Math.floor(halfPoints / 4)) {
+            return WORD_LEGACY_SCRIPT_RATIO;
+        }
+    }
+    return 1331 / 2048;
+}
+
 export function getDocumentFontStyle(
     textStyle?: Nullable<ITextStyle>,
     fontFamilyFallbacks?: Record<string, string>,
@@ -313,7 +354,7 @@ export function getDocumentFontStyle(
         if (/^(?:SimSun|宋体|DengXian|等线|PMingLiU)$/i.test(family)) {
             wordScriptSizeRatio = 0.5;
         } else if (WORD_SCRIPT_1331_FAMILIES.has(family.toLowerCase())) {
-            wordScriptSizeRatio = 1331 / 2048;
+            wordScriptSizeRatio = getWord1331ScriptRatio(family.toLowerCase(), textStyle.fs ?? DEFAULT_STYLES.fs);
         } else if (/^Aptos(?: Display| Narrow)?$/i.test(family)) {
             wordScriptSizeRatio = 1229 / 2048;
         } else if (/^Palatino Linotype$/i.test(family)) {
@@ -324,7 +365,7 @@ export function getDocumentFontStyle(
             wordScriptSizeRatio = 665 / 1024;
         } else if (/^(?:MS Mincho|HGS明朝E)$/i.test(family)) {
             // Word uses its legacy script scale for these faces despite their OS/2 size.
-            wordScriptSizeRatio = 0.6;
+            wordScriptSizeRatio = WORD_LEGACY_SCRIPT_RATIO;
         }
         // shortcut: unverified faces retain existing metrics until their Word script metrics are available, but
         // their size is rounded to half-points as Word rounds it for every font.

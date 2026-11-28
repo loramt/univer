@@ -287,6 +287,18 @@ describe('Word document script font sizes', () => {
         ['Century Gothic', 12, 8.04],
         ['Courier New', 11, 6.96],
         ['Garamond', 13, 8.52],
+        // probe apici-corpi of the bench: below a quarter of the font size the superscript offset of Garamond (469 of
+        // 2048) gives scripts of three fifths
+        ['Garamond', 10, 6.48],
+        ['Garamond', 12, 6.96],
+        ['Garamond', 14, 8.52],
+        ['Garamond', 15, 9.48],
+        ['Garamond', 16, 9.48],
+        ['Garamond', 18.5, 11.04],
+        ['Garamond', 19, 12.48],
+        ['Garamond', 30, 18],
+        ['Book Antiqua', 30, 19.56],
+        ['Cambria', 28, 18],
         ['Book Antiqua', 10, 6.48],
         ['Trebuchet MS', 9, 6],
         ['Constantia', 12, 8.04],
