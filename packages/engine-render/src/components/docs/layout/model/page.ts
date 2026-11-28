@@ -1138,25 +1138,26 @@ export function expandCellPageHeightForInlineDrawings(pages: IDocumentSkeletonPa
 
 /**
  * Word grows a table cell to hold the drawings anchored in it that the text wraps around: in Word 365 a picture 40 pt
- * high, 30 pt below the top of its cell, makes the row 70 pt high, wherever its text ends.
+ * high, 30 pt below the top of its cell, makes the row 70 pt high, wherever its text ends. Only the part of the cell
+ * where it ends grows: an earlier part fills the room the page gave it, and growing it would leave the rest of the
+ * cell where it was laid out.
  */
 export function expandCellPageHeightForFloatingDrawings(ctx: ILayoutContext, pages: IDocumentSkeletonPage[]) {
-    if (ctx.dataModel?.documentStyle?.documentFlavor !== DocumentFlavor.TRADITIONAL) {
+    const page = pages[pages.length - 1];
+    if (page == null || ctx.dataModel?.documentStyle?.documentFlavor !== DocumentFlavor.TRADITIONAL) {
         return;
     }
-    for (const page of pages) {
-        page.skeDrawings?.forEach((drawing) => {
-            const layoutType = drawing.drawingOrigin?.layoutType;
-            if (
-                layoutType == null ||
-                layoutType === PositionedObjectLayoutType.INLINE ||
-                layoutType === PositionedObjectLayoutType.WRAP_NONE
-            ) {
-                return;
-            }
-            page.height = Math.max(page.height, (drawing.aTop ?? 0) + (drawing.height ?? 0));
-        });
-    }
+    page.skeDrawings?.forEach((drawing) => {
+        const layoutType = drawing.drawingOrigin?.layoutType;
+        if (
+            layoutType == null ||
+            layoutType === PositionedObjectLayoutType.INLINE ||
+            layoutType === PositionedObjectLayoutType.WRAP_NONE
+        ) {
+            return;
+        }
+        page.height = Math.max(page.height, (drawing.aTop ?? 0) + (drawing.height ?? 0));
+    });
 }
 
 export function expandCellPageHeightForFlowTables(pages: IDocumentSkeletonPage[]) {
