@@ -15,7 +15,8 @@
  */
 
 import getCanvasWindow from 'jest-canvas-mock/lib/window';
-import { vi } from 'vitest';
+import { afterEach, vi } from 'vitest';
+import { takeLayoutWarnings } from './src/components/docs/layout/layout-warnings';
 
 const apis = [
     'Path2D',
@@ -33,4 +34,13 @@ const canvasWindow = getCanvasWindow({ document: window.document });
 
 apis.forEach((api) => {
     vi.stubGlobal(api, canvasWindow[api]);
+});
+
+// A warning of the layout is a bound it reached on laying the same thing out again, where it took a decision of its
+// own: a defect, which fails the test that met it. The tests of the bounds take their warnings themselves.
+afterEach(() => {
+    const warnings = takeLayoutWarnings();
+    if (warnings.length > 0) {
+        throw new Error(`The layout warned: ${warnings.join('; ')}`);
+    }
 });

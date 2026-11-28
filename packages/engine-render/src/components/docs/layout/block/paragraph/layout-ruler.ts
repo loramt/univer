@@ -64,6 +64,7 @@ import {
     isTraditionalDocumentCompatibility,
     shouldAllowImportedTableMarginOverflow,
 } from '../../../document-compatibility';
+import { warnLayout } from '../../layout-warnings';
 import { BreakPointType } from '../../line-breaker/break';
 import {
     addGlyphToDivide,
@@ -109,8 +110,8 @@ import {
     resolveParagraphCharacterIndents,
 } from '../../tools';
 import { cachePrecomputedTableSkeleton, createTableSkeletons, getTableLeft } from '../table';
+import { LINE_LAYOUT_OVERFLOW_TOLERANCE, lineRoom } from './line-room';
 
-const LINE_LAYOUT_OVERFLOW_TOLERANCE = 2;
 const FLOAT_OBJECT_RELAYOUT_LIMIT = 5;
 const MIN_LINE_WIDTH_TOLERANCE = 1;
 const MAX_LINE_WIDTH_TOLERANCE = 3;
@@ -916,9 +917,13 @@ function _appendFittingGlyphs(
         ctx.viewModel.getSelfOrHeaderFooterViewModel(lastPage.segmentId).getParagraph(paragraphConfig.paragraphIndex) != null) {
         // The mark can arrive after a heightless anchor fragment. Re-layout the
         // complete paragraph so its real height also participates in pagination.
-        currentLine.parent.lines.pop();
-        _lineOperator(ctx, [...lineGlyphs, ...glyphGroup], pages, sectionBreakConfig, paragraphConfig, currentLine.paragraphStart, breakPointType);
-        return;
+        const column = currentLine.parent;
+        if (_layLineOutAgain(paragraphConfig, 'its mark after an anchor', () => {
+            column.lines.pop();
+            _lineOperator(ctx, [...lineGlyphs, ...glyphGroup], pages, sectionBreakConfig, paragraphConfig, currentLine.paragraphStart, breakPointType);
+        })) {
+            return;
+        }
     }
 
     if (currentLine?.parent && __isNullLine(currentLine) && __hasFlowGlyph(glyphGroup)) {
@@ -926,9 +931,13 @@ function _appendFittingGlyphs(
         if (cachedGlyphs.length > 0 && cachedGlyphs.every((glyph) => glyph.streamType === DataStreamTreeTokenType.PAGE_BREAK)) {
             // A skipped rendered-page hint has no font metrics. Let the first real text
             // establish its line, including normal font leading and available page height.
-            currentLine.parent.lines.pop();
-            _lineOperator(ctx, [...cachedGlyphs, ...glyphGroup], pages, sectionBreakConfig, paragraphConfig, currentLine.paragraphStart, breakPointType, defaultSpanMetrics);
-            return;
+            const column = currentLine.parent;
+            if (_layLineOutAgain(paragraphConfig, 'its first text after a page hint', () => {
+                column.lines.pop();
+                _lineOperator(ctx, [...cachedGlyphs, ...glyphGroup], pages, sectionBreakConfig, paragraphConfig, currentLine.paragraphStart, breakPointType, defaultSpanMetrics);
+            })) {
+                return;
+            }
         }
     }
 
@@ -949,7 +958,7 @@ function _appendFittingGlyphs(
     const reflowMetrics = currentLine
         ? _getExpandedLineMetrics(ctx, currentLine, lineGlyphs, glyphGroup, sectionBreakConfig, paragraphConfig)
         : undefined;
-    if (currentLine && reflowMetrics) {
+    if (currentLine && reflowMetrics && _layLineOutAgain(paragraphConfig, 'its metrics or its room', () => {
         // Rebuild the complete line with the incoming run's metrics.
         const spanGroupCached = lineGlyphs;
         const spanGroupCachedLen = spanGroupCached.length;
@@ -995,7 +1004,7 @@ function _appendFittingGlyphs(
         // Replaying a zero-height page hint can rebuild the line again.
         // Keep the complete mixed-run metrics throughout that replay.
         _divideOperator(ctx, glyphGroup, pages, sectionBreakConfig, paragraphConfig, isParagraphFirstShapedText, breakPointType, reflowMetrics);
-
+    })) {
         return;
     }
 
@@ -1024,6 +1033,40 @@ function _appendFittingGlyphs(
 
     addGlyphToDivide(divide, glyphGroup, preOffsetLeft);
     updateDivideInfo(divide, { breakType: breakPointType });
+}
+
+/**
+ * How deep the layout of a line may lay that same line out again inside its own layout. Laying a line out again with
+ * the metrics or the room it found settles at once, one or two deep; deeper, two checks of the line disagree (one lets
+ * it stay, the other lays it out again), and the line stays as it is, with a warning, instead of the layout running
+ * until the stack is full (the Mosaico of Golden Group with the rule of twips alone, fork 8b580ea3a).
+ */
+const MAX_LINE_RELAYOUT_DEPTH = 16;
+let lineRelayoutDepth = 0;
+let lineRelayoutExhausted = false;
+
+/**
+ * Lays the current line out again, unless the layout is already doing so MAX_LINE_RELAYOUT_DEPTH deep: then it warns
+ * once, returns false, and the caller keeps the line as it is. Until that layout unwinds, no line is laid out again.
+ */
+function _layLineOutAgain(paragraphConfig: IParagraphConfig, why: string, layOut: () => void): boolean {
+    if (lineRelayoutExhausted || lineRelayoutDepth >= MAX_LINE_RELAYOUT_DEPTH) {
+        if (!lineRelayoutExhausted) {
+            lineRelayoutExhausted = true;
+            warnLayout(`a line of paragraph ${paragraphConfig.paragraphIndex} was laid out again ${MAX_LINE_RELAYOUT_DEPTH} times inside its own layout, for ${why}: it stays as it is`);
+        }
+        return false;
+    }
+    lineRelayoutDepth++;
+    try {
+        layOut();
+    } finally {
+        lineRelayoutDepth--;
+        if (lineRelayoutDepth === 0) {
+            lineRelayoutExhausted = false;
+        }
+    }
+    return true;
 }
 
 function _getExpandedLineMetrics(
@@ -1115,8 +1158,7 @@ function _getExpandedLineMetrics(
         page?.type === DocumentSkeletonPageType.CELL && section != null && column != null && column.lines.length > 1 &&
         isTraditionalDocumentCompatibility(paragraphConfig.documentCompatibilityPolicy) &&
         paragraphConfig.paragraphStyle?.afterAutoSpacing !== BooleanNumber.TRUE &&
-        currentLine.top + currentLine.lineHeight + Math.max(0, currentLine.spaceBelowApply - currentLine.marginBottom) >
-        section.height + 1e-6;
+        lineRoom.cellParagraphEndOverflows(page, paragraphConfig, currentLine.top + currentLine.lineHeight + Math.max(0, currentLine.spaceBelowApply - currentLine.marginBottom), section.height);
 
     if (contentHeight - currentLine.contentHeight > LINE_LAYOUT_OVERFLOW_TOLERANCE || expandsVisibleText || expandsFontLeading || expandsBorder || clearsParagraphSpacing || cellContinuationSpacingOverflows) {
         return {
@@ -2093,32 +2135,6 @@ function _getLineOverflowHeight(
     return lineHeight - trailingLeading + cellParagraphEndSpace;
 }
 
-function _getLineOverflowTolerance(lastPage: IDocumentSkeletonPage, paragraphConfig: IParagraphConfig): number {
-    // Visible text must fit paginated body and cell bounds; blank trailing leading is excluded above.
-    return _measuresInTwips(lastPage, paragraphConfig)
-        ? 1e-6
-        : LINE_LAYOUT_OVERFLOW_TOLERANCE;
-}
-
-/** Whether the page lays out its lines in whole twips, as Word does: the body and the cells of Word documents. */
-function _measuresInTwips(lastPage: IDocumentSkeletonPage, paragraphConfig: IParagraphConfig): boolean {
-    return (lastPage.type === DocumentSkeletonPageType.CELL || lastPage.type === DocumentSkeletonPageType.BODY) &&
-        isTraditionalDocumentCompatibility(paragraphConfig.documentCompatibilityPolicy);
-}
-
-/**
- * Whether a line that ends at bottom passes the room that ends at limit, both from the top of the section, as Word
- * measures them: the room in whole twips, the line without the part of a twip it ends with. Word keeps on its page a
- * line that ends less than a twip past its room (probe soglia-twip of the bench, Word 365: lines exactly at the end
- * of the body and half a twip past it stay, at one twip and more they go to the next page, with five widths of
- * border; the Mosaico of Golden Group, page 300: an empty paragraph 0.1 twip past the room its notes leave stays).
- * The room is rounded to the twip because the conversion gives pixels to the hundredth, a fifth of a twip.
- */
-function _overflowsInTwips(bottom: number, limit: number): boolean {
-    // 1 px is 15 twips
-    return Math.floor(bottom * 15 + 1e-6) > Math.round(limit * 15);
-}
-
 function _lineOperator(
     ctx: ILayoutContext,
     glyphGroup: IDocumentSkeletonGlyph[],
@@ -2283,11 +2299,8 @@ function _lineOperator(
         footnoteBodyLimit = ctx.footnoteLayout!.getBodyLimit(lastPage, pages, sectionBreakConfig, section.top + newLineTop + lineHeight, glyphGroup, true);
     }
     const availableSectionHeight = footnoteBodyLimit == null ? section.height : Math.min(section.height, footnoteBodyLimit - section.top);
-    const lineOverflowTolerance = _getLineOverflowTolerance(lastPage, paragraphConfig);
     const lineBottom = _getLineOverflowHeight(lastPage, paragraphConfig, glyphGroup, isParagraphFirstShapedText, lineMetrics, lineHeight) + newLineTop;
-    const lineOverflowsSection = !clipsSameParagraphInlineDrawing && (_measuresInTwips(lastPage, paragraphConfig)
-        ? _overflowsInTwips(lineBottom, availableSectionHeight)
-        : lineBottom - availableSectionHeight > lineOverflowTolerance);
+    const lineOverflowsSection = !clipsSameParagraphInlineDrawing && lineRoom.overflows(lastPage, paragraphConfig, lineBottom, availableSectionHeight);
 
     // The part of its table above the line takes the page as lines would: a line that does not fit below it goes to
     // the next page, as Word moves the paragraph after a table that ends at the foot of a page it opened.
@@ -2301,7 +2314,7 @@ function _lineOperator(
         // Cell after-spacing contributes to the fragment's height when it fits.
         // Never let a trial next paragraph inflate the fragment beyond its capacity.
         const keepCellAfterSpacing = lastPage.type === DocumentSkeletonPageType.CELL && preLine != null &&
-            preLine.top + preLine.lineHeight <= section.height + lineOverflowTolerance;
+            !lineRoom.overflows(lastPage, paragraphConfig, preLine.top + preLine.lineHeight, section.height);
         if (!keepCellAfterSpacing && preLine && previousLineHeight != null &&
             isTraditionalDocumentCompatibility(paragraphConfig.documentCompatibilityPolicy)) {
             preLine.lineHeight = previousLineHeight;

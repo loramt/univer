@@ -45,6 +45,7 @@ import {
     isTraditionalDocumentCompatibility,
     shouldAllowImportedTableMarginOverflow,
 } from '../../document-compatibility';
+import { warnLayout } from '../layout-warnings';
 import {
     createNullCellPage,
     createSkeletonCellPages,
@@ -542,9 +543,18 @@ export interface ISlicedTableSkeletonBuildState {
 /**
  * How many times a row is laid out again with the page heights its notes leave. The heights only decrease, so the
  * measurement ends by itself; the bound keeps a row whose measurement does not settle from going on without end: its
- * last heights are kept.
+ * last heights are kept, with a warning.
  */
 const MAX_ROW_NOTE_MEASURES = 24;
+
+/** Whether this measure of a row for its notes is the last one the bound allows: it keeps its heights, with a warning. */
+function isLastRowNoteMeasure(measures: number, row: number): boolean {
+    if (measures < MAX_ROW_NOTE_MEASURES) {
+        return false;
+    }
+    warnLayout(`row ${row} of a table was measured for its notes ${MAX_ROW_NOTE_MEASURES} times without settling: it keeps its last heights`);
+    return true;
+}
 
 interface ICreateTableCache {
     rowTop: number;
@@ -691,7 +701,7 @@ export function stepTableSkeletonsBuild(state: ISlicedTableSkeletonBuildState): 
         precomputedRow,
         state.preparedCellPages,
         state.cellPageHeights,
-        (state.noteMeasures = (state.noteMeasures ?? 0) + 1) >= MAX_ROW_NOTE_MEASURES
+        isLastRowNoteMeasure(state.noteMeasures = (state.noteMeasures ?? 0) + 1, state.rowIndex)
     );
     if (nextHeights) {
         state.cellPageHeights = nextHeights;
@@ -824,7 +834,7 @@ export function createTableSkeletons(
                 precomputedTable?.rows[row],
                 undefined,
                 cellPageHeights,
-                ++measures >= MAX_ROW_NOTE_MEASURES
+                isLastRowNoteMeasure(++measures, row)
             );
         } while (cellPageHeights);
     }
