@@ -120,6 +120,71 @@ describe('autofit tables of Word', () => {
             .toEqual([100, 200, 300]);
     });
 
+    /** The columns of an autofit table of these texts nested in the second cell of a fixed table. */
+    function nestedColumnsOf(texts: string[]) {
+        const previousContext = Reflect.get(FontCache, '_context');
+        Reflect.set(FontCache, '_context', null);
+        FontCache.invalidateMetrics(() => true);
+        const context = {
+            font: '',
+            measureText(this: CanvasRenderingContext2D, value: string) {
+                return { width: value.length * 4, fontBoundingBoxAscent: 8, fontBoundingBoxDescent: 2, actualBoundingBoxAscent: 8, actualBoundingBoxDescent: 2 };
+            },
+        } as unknown as CanvasRenderingContext2D;
+        const canvas = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+        const T = DataStreamTreeTokenType;
+        const cell = (content: string) => `${T.TABLE_CELL_START}${content}${T.PARAGRAPH}${T.SECTION_BREAK}${T.TABLE_CELL_END}`;
+        const inner = `${T.TABLE_START}${T.TABLE_ROW_START}${texts.map(cell).join('')}${T.TABLE_ROW_END}${T.TABLE_END}`;
+        const outer = `${T.TABLE_START}${T.TABLE_ROW_START}${cell('esterna')}${cell(inner)}${T.TABLE_ROW_END}${T.TABLE_END}`;
+        const dataStream = `${outer}${T.PARAGRAPH}${T.SECTION_BREAK}`;
+        const zero = { start: { v: 0 }, end: { v: 0 }, top: { v: 0 }, bottom: { v: 0 } };
+        const table = (tableId: string, grid: number[], autoFit?: IWordAutoFit) => ({
+            tableId,
+            align: TableAlignmentType.START,
+            indent: { v: 0 },
+            textWrap: TableTextWrapType.NONE,
+            position: { positionH: { relativeFrom: ObjectRelativeFromH.PAGE }, positionV: { relativeFrom: ObjectRelativeFromV.PAGE } },
+            dist: { distT: 0, distB: 0, distL: 0, distR: 0 },
+            size: { type: TableSizeType.SPECIFIED, width: { v: grid.reduce((sum, width) => sum + width, 0) } },
+            layout: TableLayoutType.FIXED,
+            cellMargin: zero,
+            tableColumns: grid.map((width) => ({ size: { type: TableSizeType.SPECIFIED, width: { v: width } } })),
+            tableRows: [{ trHeight: { hRule: TableRowHeightRule.AUTO, val: { v: 0 } }, tableCells: grid.map(() => ({ margin: zero })) }],
+            ...(autoFit ? { wordAutoFit: autoFit } : {}),
+        } as ITable);
+        const nestedAutoFit = { width: { type: 'auto' as const, value: 0 }, columns: texts.map(() => auto) };
+        const bed = createParagraphLayoutTestBed(outer, {
+            body: {
+                paragraphs: Array.from(dataStream).flatMap((token, startIndex) => token === T.PARAGRAPH ? [{ startIndex, paragraphId: `p-${startIndex}`, paragraphStyle: { lineSpacing: 16, spacingRule: SpacingRule.EXACT, snapToGrid: BooleanNumber.FALSE } }] : []),
+                sectionBreaks: Array.from(dataStream).flatMap((token, startIndex) => token === T.SECTION_BREAK ? [{ startIndex, sectionId: `s-${startIndex}` }] : []),
+                tables: [{ tableId: 'outer', startIndex: 0, endIndex: outer.length }, { tableId: 'inner', startIndex: outer.indexOf(inner), endIndex: outer.indexOf(inner) + inner.length }],
+            },
+            tableSource: { outer: table('outer', [200, 400]), inner: table('inner', texts.map(() => 150), nestedAutoFit) },
+            documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL, textStyle: { ff: 'Arial', fs: 11 }, pageSize: { width: 600, height: 800 }, marginLeft: 0, marginRight: 0 },
+        });
+        const skeleton = DocumentSkeleton.create(bed.viewModel, bed.sectionBreakConfig.localeService);
+        try {
+            skeleton.calculate();
+            const outerTable = skeleton.getSkeletonData()!.pages[0].skeTables.get('outer')!;
+            const nested = outerTable.rows[0].cells[1].skeTables.get('inner')!;
+            return nested.tableSource.tableColumns.map((column) => Math.round(column.size.width.v * 100) / 100);
+        } finally {
+            skeleton.dispose();
+            bed.viewModel.dispose();
+            bed.dataModel.dispose();
+            canvas.mockRestore();
+            Reflect.set(FontCache, '_context', previousContext);
+            FontCache.invalidateMetrics(() => true);
+            clearFontCreateConfigCache();
+        }
+    }
+
+    it('keeps the grid of an autofit table nested in a fixed table', () => {
+        // Word 365 (probe v5-annidate of the fifth verification): two columns of 75 pt, with long text and with short
+        expect(nestedColumnsOf(['aa', long])).toEqual([150, 150]);
+        expect(nestedColumnsOf(['aa', 'bb'])).toEqual([150, 150]);
+    });
+
     it('keeps the lengths of a table without a width of its own that fits', () => {
         const length = (value: number) => ({ type: 'dxa' as const, value });
         expect(columnsOf(['aa', 'bb'], { width: { type: 'auto', value: 0 }, columns: [length(100), length(150)] }, [300, 300]))

@@ -1592,8 +1592,14 @@ function resolveTableForLayout(
     config: ISectionBreakConfig,
     source: ITable
 ): ITable {
-    // an autofit table of Word: its columns divided by their content, as Word divides them
-    const fitted = resolveWordAutoFitColumns(ctx, viewModel, tableNode, config, source, getTableAvailableWidth(page));
+    // an autofit table of Word: its columns divided by their content, as Word divides them. Nested in a cell of a
+    // fixed table it keeps its grid, as in Word 365 (two columns of 75 pt with short and with long text, two halves
+    // of the cell at 100%); nested in an autofit table it is divided too.
+    const parent = config.cellTableId ? viewModel.getTableSource(config.cellTableId) : undefined;
+    const keepsGrid = parent != null && (parent as ITable & { wordAutoFit?: unknown }).wordAutoFit == null;
+    const fitted = keepsGrid
+        ? source
+        : resolveWordAutoFitColumns(ctx, viewModel, tableNode, config, source, getTableAvailableWidth(page));
     const table = resolveTableLayoutColumns(
         fitted,
         getTableAvailableWidth(page),

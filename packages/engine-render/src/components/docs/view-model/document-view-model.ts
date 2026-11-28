@@ -923,6 +923,11 @@ export class DocumentViewModel implements IDisposable {
         }
     }
 
+    /** The source of a table of this document, its header and its footer, by its id. */
+    getTableSource(tableId: string): ITable | undefined {
+        return (this._tableSource ?? this.getSnapshot().tableSource)?.[tableId];
+    }
+
     getTableByStartIndex(index: number) {
         if (this._metadataCachesDirty) {
             const table = findByStartIndex(this.getBody()?.tables ?? [], index, this._tablesOrdered);
