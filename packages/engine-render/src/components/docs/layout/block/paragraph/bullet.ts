@@ -15,7 +15,7 @@
  */
 
 import type { IBullet, IDocumentStyle, ILists, INestingLevel, ITextStyle, LocaleService, Nullable } from '@univerjs/core';
-import { ListGlyphType } from '@univerjs/core';
+import { ListGlyphType, PresetListType } from '@univerjs/core';
 import type { IDocumentSkeletonBullet } from '../../../../../basics/i-document-skeleton-cached';
 import type { IDocumentCompatibilityPolicy } from '../../../document-compatibility';
 import { getDocumentFontStyle } from '../../../document-compatibility';
@@ -64,6 +64,11 @@ export function dealWithBullet(
         fontPolicy,
         documentCompatibilityPolicy
     );
+    // Only the check lists of Univer draw their box as a checkbox: a box of Wingdings or of another font of a Word
+    // document is a glyph of the bullet, as Word draws it.
+    if (listType === PresetListType.CHECK_LIST || listType === PresetListType.CHECK_LIST_CHECKED) {
+        bulletSke.checkbox = true;
+    }
     return bulletSke;
 }
 

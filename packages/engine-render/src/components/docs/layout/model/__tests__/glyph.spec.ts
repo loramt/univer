@@ -746,6 +746,41 @@ describe('Glyph utils test cases', () => {
             measureSpy.mockRestore();
         });
 
+        it('draws the box of a bullet that is not a check list as a glyph of its font', () => {
+            // A box of Wingdings 2 in a Word list (F0A3, U+2610) is a glyph, as Word draws it: the checkbox shape,
+            // which the PDF does not paint, belongs to the check lists of Univer only.
+            const measureSpy = vi.spyOn(FontCache, 'getTextSize').mockReturnValue({
+                width: 16,
+                ba: 18,
+                bd: 2,
+                aba: 18,
+                abd: 2,
+                sp: 0,
+                sbr: 0,
+                sbo: 0,
+                spr: 0,
+                spo: 0,
+            });
+
+            const bulletGlyph = createSkeletonBulletGlyph(
+                {
+                    ts: { fs: 20 },
+                    bBox: { ba: 18, bd: 2 },
+                } as IDocumentSkeletonGlyph,
+                {
+                    listId: 'docx-1',
+                    symbol: '\u2610',
+                    ts: { ff: 'Wingdings 2' },
+                    startIndexItem: 1,
+                },
+                10
+            );
+
+            expect(bulletGlyph.checkbox).toBeUndefined();
+            expect(bulletGlyph.bBox.width).toBe(16);
+            measureSpy.mockRestore();
+        });
+
         it('inherits the paragraph font size when centering the custom checkbox shape', () => {
             const measureSpy = vi.spyOn(FontCache, 'getTextSize').mockReturnValue({
                 width: 16,
@@ -770,10 +805,12 @@ describe('Glyph utils test cases', () => {
                     symbol: '\u2610',
                     ts: {},
                     startIndexItem: 1,
+                    checkbox: true,
                 },
                 10
             );
 
+            expect(bulletGlyph.checkbox).toBe(true);
             expect(bulletGlyph.ts?.fs).toBe(20);
             expect(bulletGlyph.width).toBe(30);
             expect(bulletGlyph.bBox).toMatchObject({

@@ -328,6 +328,8 @@ export interface IDocumentSkeletonGlyph {
     glyphId?: string; // elementId, For custom cases
     glyphType: GlyphType; // GlyphType
     streamType: DataStreamTreeTokenType;
+    /** The bullet of a check list, drawn as a checkbox. */
+    checkbox?: boolean;
     width: number; // cum width
     bBox: IDocumentSkeletonBoundingBox; // bBox: size of glyph
     xOffset: number; // xOffset, adjust text align in glyph
@@ -376,6 +378,8 @@ export interface IDocumentSkeletonBullet {
     nestingLevel?: INestingLevel;
     bulletAlign?: BulletAlignment;
     bulletType?: boolean; // bulletType false unordered, true ordered;
+    /** A check list of Univer, whose box (\u2610, \u2611) is drawn as a checkbox; any other bullet is a glyph. */
+    checkbox?: boolean;
     compactSpacing?: boolean;
     preserveTextLineHeight?: boolean;
     imageSource?: string;

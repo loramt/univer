@@ -15,7 +15,7 @@
  */
 
 import type { IBullet, ILists, INestingLevel } from '@univerjs/core';
-import { BulletAlignment, ListGlyphType } from '@univerjs/core';
+import { BulletAlignment, ListGlyphType, PresetListType } from '@univerjs/core';
 import { describe, expect, it } from 'vitest';
 import { dealWithBullet, getDefaultBulletSke } from '../bullet';
 
@@ -70,6 +70,16 @@ describe('bullet', () => {
         it('keeps an explicitly unnumbered level empty even when its format contains a counter', () => {
             const lists = createLists([createNestingLevel({ glyphType: ListGlyphType.NONE, glyphFormat: '.%1' })]);
             expect(dealWithBullet(createBullet(), lists)?.symbol).toBe('');
+        });
+
+        it('marks only the check lists of Univer as checkboxes', () => {
+            const level = createNestingLevel({ glyphSymbol: '\u2610' });
+            const lists: ILists = {
+                ...createLists([level]),
+                [PresetListType.CHECK_LIST]: { listType: PresetListType.CHECK_LIST, nestingLevel: [level] },
+            };
+            expect(dealWithBullet(createBullet({ listType: PresetListType.CHECK_LIST }), lists)?.checkbox).toBe(true);
+            expect(dealWithBullet(createBullet(), lists)?.checkbox).toBeUndefined();
         });
 
         it('returns undefined when bullet is missing', () => {

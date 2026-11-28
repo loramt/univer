@@ -664,7 +664,7 @@ export function createSkeletonBulletGlyph(
         documentCompatibilityPolicy ?? getDocumentCompatibilityPolicy()
     );
     const measuredBoundingBox = { ...metrics, width: metrics.width * getTextHorizontalScale(textStyle.sa) };
-    const checkboxSize = isCheckboxGlyph(content) ? getCheckboxShapeSize(textStyle.fs) : null;
+    const checkboxSize = bulletSkeleton.checkbox && isCheckboxGlyph(content) ? getCheckboxShapeSize(textStyle.fs) : null;
     const boundingBox = checkboxSize == null
         ? measuredBoundingBox
         : _getCheckboxBoundingBox(measuredBoundingBox, checkboxSize);
@@ -706,6 +706,7 @@ export function createSkeletonBulletGlyph(
         adjustability: baseAdjustability(content, width),
         glyphType: GlyphType.LIST,
         streamType: DataStreamTreeTokenType.LETTER,
+        ...(checkboxSize == null ? {} : { checkbox: true }),
         // Deliberately set to 0 so that there is no need to count when calculating the cursor.
         count: 0,
         raw: content,

@@ -913,6 +913,27 @@ describe('docs font and baseline extension', () => {
         expect(TestContext.fillText).toHaveBeenCalledWith('阿', 18, 22);
     });
 
+    it('draws the box of a list that is not a check list as text', () => {
+        // A bullet of Wingdings 2 in a Word list: the PDF paints its glyph, and would lose a checkbox shape.
+        const extension = new FontAndBaseLine();
+        const TestContext = createContext();
+        const checkSpy = vi.spyOn(CheckboxShape, 'drawWith').mockImplementation(() => undefined);
+        extension.extensionOffset = {
+            spanPointWithFont: Vector2.create(30, 50),
+            spanStartPoint: Vector2.create(24, 44),
+            centerPoint: Vector2.create(8, 8),
+            renderConfig: { vertexAngle: 0, centerAngle: 0 },
+        } as IExtensionConfig;
+        extension.draw(TestContext, DEFAULT_SCALE, createGlyph('\u2610', {
+            glyphType: GlyphType.LIST,
+            bBox: { width: 18, aba: 14, abd: 4 },
+            ts: { fs: 10, ff: 'Wingdings 2' },
+        }));
+        expect(checkSpy).not.toHaveBeenCalled();
+        expect(TestContext.fillText).toHaveBeenCalledWith('\u2610', expect.any(Number), expect.any(Number));
+        checkSpy.mockRestore();
+    });
+
     it('renders checkbox list glyphs and clears cache', () => {
         const extension = new FontAndBaseLine();
         const TestContext = createContext();
@@ -930,6 +951,7 @@ describe('docs font and baseline extension', () => {
 
         const checkedGlyph = createGlyph('\u2611', {
             glyphType: GlyphType.LIST,
+            checkbox: true,
             bBox: {
                 width: 18,
                 aba: 14,

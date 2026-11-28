@@ -484,7 +484,7 @@ export class FontAndBaseLine extends docExtension {
             this._paintGlyphText(ctx, glyph, 0, 0);
             ctx.restore();
         } else {
-            if (isCheckboxGlyph(content) && glyph.glyphType === GlyphType.LIST) {
+            if (glyph.checkbox && isCheckboxGlyph(content) && glyph.glyphType === GlyphType.LIST) {
                 const size = glyph.bBox.width;
                 ctx.save();
                 const left = spanPointWithFont.x;
