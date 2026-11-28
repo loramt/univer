@@ -289,17 +289,27 @@ function collectCellReferenceLines(page: IDocumentSkeletonPage, offset = 0): { t
 }
 
 /**
- * How high a part of the row must be to hold the first line of one of its cells, with the cell's margins (0 when a
- * cell starts with something else than a line), as the table layout measures it when a row moves whole.
+ * How high a part of the row must be to hold the first line of one of its cells, with the cell's margins, as the
+ * table layout measures it when a row moves whole: the first line of a cell is its own or that of the first row of a
+ * table inside it, whichever comes first. A part whose cells hold no line counts 0.
  */
 function rowFirstLineHeight(row: IDocumentSkeletonTable['rows'][number]): number {
     let height = Number.POSITIVE_INFINITY;
     for (const cell of row.cells) {
+        const bottoms: number[] = [];
         const line = cell.sections[0]?.columns[0]?.lines[0];
-        if (!line || cell.skeTables.size > 0) {
-            return 0;
+        if (line) {
+            bottoms.push(line.top + line.lineHeight);
         }
-        height = Math.min(height, (cell.marginTop ?? 0) + line.top + line.lineHeight + (cell.marginBottom ?? 0));
+        for (const table of cell.skeTables.values()) {
+            const first = table.rows[0] ? rowFirstLineHeight(table.rows[0]) : 0;
+            if (first > 0) {
+                bottoms.push(table.top + first);
+            }
+        }
+        if (bottoms.length > 0) {
+            height = Math.min(height, (cell.marginTop ?? 0) + Math.min(...bottoms) + (cell.marginBottom ?? 0));
+        }
     }
     return Number.isFinite(height) ? height : 0;
 }
@@ -531,6 +541,7 @@ export class DocumentFootnoteLayout {
                 }
                 const heights = [...(previousHeights ?? [])];
                 let changed = false;
+                let skippedPages = 0;
                 for (let index = 0; index < rows.length; index++) {
                     const row = rows[index];
                     const onCurrentPage = index === 0 && !startsOnNextPage;
@@ -574,6 +585,19 @@ export class DocumentFootnoteLayout {
                     // a reference, or two lines with one, end the part (righe-orfane D1, D3, D5), and so does a single
                     // line whose note starts below it and continues on the next page: Word ends the page with that
                     // line (the verifier's probes v8r-lunga-40 and -44, a note of 20 lines).
+                    // A later page that a continuing note takes so far that not even the first line of the part fits
+                    // holds none of the row: the part starts on the page after it, as in Word (the verifier's probes
+                    // v8m-riga and v8m-annidata, R1 of the eighth check: the part of one line went to the page where
+                    // the note ends, and the rest of the row to a page more). The table puts the part there, past the
+                    // page of the note.
+                    if (!onCurrentPage && heights[index] === undefined && capacity + 0.01 < rowFirstLineHeight(row) &&
+                        this._getInherited(measurePage, measurePages, config).fragments.length > 0 && skippedPages < 8) {
+                        skippedPages++;
+                        measurePage = createSkeletonPage(this._ctx, config, this._ctx.skeletonResourceReference, getNextSkeletonPageNumber(measurePage, config));
+                        measurePages.push(measurePage);
+                        index--;
+                        continue;
+                    }
                     const partHeight = Math.min(capacity, row.height);
                     // A part below other content of the page that cannot hold the first line of its cells holds
                     // nothing: the row goes to the next page whole, as Word moves it (the verifier's probes v8r-prima-40,

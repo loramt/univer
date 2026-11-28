@@ -449,6 +449,59 @@ describe('footnote body layout', () => {
         }
     });
 
+    it('puts the rest of a row on the page where its long note ends, past the page of the note', () => {
+        // The verifier's probes v8m-riga and v8m-annidata (R1 of the eighth check): a row with a reference to a note
+        // that fills the whole next page. The page after the note's page held one line of the row and the rest went to
+        // a page more; Word puts the whole rest of the row on the page where the note ends.
+        const T = DataStreamTreeTokenType;
+        const cellText = `${Array.from({ length: 36 }, (_, line) => `Cell ${line + 1}${line === 5 ? '￼' : ''}${T.PARAGRAPH}`).join('')}${T.SECTION_BREAK}`;
+        const tableStream = `${T.TABLE_START}${T.TABLE_ROW_START}${T.TABLE_CELL_START}Etichetta${T.PARAGRAPH}${T.SECTION_BREAK}${T.TABLE_CELL_END}${T.TABLE_CELL_START}${cellText}${T.TABLE_CELL_END}${T.TABLE_ROW_END}${T.TABLE_END}`;
+        const dataStream = `${tableStream}\r\n`;
+        const reference = dataStream.indexOf('￼');
+        const noteStream = `${Array.from({ length: 90 }, (_, index) => `Note line ${index + 1}\r`).join('')}\n`;
+        const bed = createParagraphLayoutTestBed('', {
+            documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL, pageSize: { width: 400, height: 500 } },
+            body: {
+                dataStream,
+                paragraphs: [...dataStream.matchAll(/\r/g)].map((match, index) => ({ startIndex: match.index!, paragraphId: `p-${index}` })),
+                sectionBreaks: [...dataStream.matchAll(/\n/g)].map((match, index) => ({ startIndex: match.index!, sectionId: `s-${index}` })),
+                tables: [{ tableId: 'table', startIndex: 0, endIndex: tableStream.length }],
+                customRanges: [{ rangeId: 'reference', rangeType: CustomRangeType.FOOTNOTE, startIndex: reference, endIndex: reference, wholeEntity: true, properties: { noteId: 'note' } }],
+            },
+            tableSource: {
+                table: {
+                    tableId: 'table',
+                    align: 0,
+                    indent: { v: 0 },
+                    textWrap: 0,
+                    size: { type: 0, width: { v: 360 } },
+                    tableRows: [{ cantSplit: 0, tableCells: [{ size: { type: 0, width: { v: 60 } } }, { size: { type: 0, width: { v: 300 } } }], trHeight: { val: { v: 0 }, hRule: 0 } }],
+                    tableColumns: [{ size: { type: 0, width: { v: 60 } } }, { size: { type: 0, width: { v: 300 } } }],
+                },
+            },
+            notes: { note: { type: 'footnote' as const, noteId: 'note', body: {
+                dataStream: noteStream,
+                paragraphs: [...noteStream.matchAll(/\r/g)].map((match, index) => ({ paragraphId: `note-${index}`, startIndex: match.index! })),
+                sectionBreaks: [{ sectionId: 'note-section', startIndex: noteStream.length - 1 }],
+            } } },
+        });
+        const skeleton = DocumentSkeleton.create(bed.viewModel, bed.ctx.docsConfig.localeService);
+        try {
+            skeleton.calculate();
+            const pages = skeleton.getSkeletonData()!.pages;
+            const rowLines = pages.map((page) => [...page.skeTables.values()].flatMap((table) => table.rows.flatMap((row) => row.cells.slice(1).flatMap((cell) =>
+                cell.sections.flatMap((section) => section.columns.flatMap((column) => column.lines))))).length);
+            const notePages = pages.map((page) => (page.notes ?? []).filter((note) => note.noteId === 'note').length);
+            // a page holds only the note, and the page after it all the rest of the row: [6, 0, 30], not [6, 0, 1, 29]
+            expect(rowLines.some((count, index) => count === 0 && notePages[index] > 0)).toBe(true);
+            expect(rowLines.filter((count) => count > 0)).toHaveLength(2);
+            expect(rowLines.reduce((sum, count) => sum + count, 0)).toBe(36);
+        } finally {
+            bed.viewModel.dispose();
+            bed.dataModel.dispose();
+        }
+    });
+
     it('lays out once the note of a header row that the table repeats on its pages', () => {
         // The verifier's probes v8-intestazione-corpo, -52 and -55 (H1 of the eighth check): Word lays out the note of
         // a repeated header row on the first page of the table only; the copies of the header on the next pages bring
