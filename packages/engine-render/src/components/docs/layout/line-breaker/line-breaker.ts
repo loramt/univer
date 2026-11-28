@@ -18,7 +18,7 @@ import type { Nullable } from '@univerjs/core';
 import { BooleanNumber } from '@univerjs/core';
 import type { ILineBreakRule } from './rule';
 import { Break, BreakPointType } from './break';
-import { AI, AL, B2, BA, BK, CJ, CR, H2, H3, HL, HY, ID, JL, JT, JV, LF, NL, NS, RI, SA, SG, SP, WJ, XX, ZWJ } from './classes';
+import { AI, AL, B2, BA, BK, CJ, CR, H2, H3, HL, HY, ID, JL, JT, JV, LF, NL, NS, OP, QU, RI, SA, SG, SP, WJ, XX, ZWJ } from './classes';
 import { CI_BRK, CP_BRK, DI_BRK, IN_BRK, pairTable, PR_BRK } from './pairs';
 import { Rule } from './rule';
 import data from './trie-data';
@@ -256,6 +256,12 @@ export class WordLineBreaker extends LineBreaker {
     protected override _pairBreak(curClass: number, nextClass: number): number {
         const pair = pairTable[curClass][nextClass];
         if (nextClass === B2 && pair === DI_BRK && pairTable[curClass][BA] === IN_BRK) {
+            return IN_BRK;
+        }
+        // A quotation mark, a space and an opening bracket break at the space, as in Word and as Unicode 15.1 left
+        // the old rule LB15 behind: in Word 365 'regime “de minimis” (Regolamento' goes to the next line before the
+        // bracket, not before the quoted word.
+        if (curClass === QU && nextClass === OP) {
             return IN_BRK;
         }
         return pair;

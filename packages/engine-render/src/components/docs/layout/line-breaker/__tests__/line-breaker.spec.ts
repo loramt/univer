@@ -172,6 +172,18 @@ it('preserves Unicode break opportunities outside Hangul when word splitting is 
     }
 });
 
+it('breaks at the space between a closing quotation mark and an opening bracket in documents, as Word', () => {
+    // Word 365 (Mosaico of Golden Group, page 178): 'regime “de minimis” (Regolamento' goes to the next line before the
+    // bracket; UAX #14 before Unicode 15.1 (LB15, QU SP* × OP) kept the quoted word with the bracket.
+    const content = 'regime “de minimis” (Regolamento';
+    const breaker = new WordLineBreaker(content);
+    const positions: number[] = [];
+    for (let point = breaker.nextBreakPoint(); point; point = breaker.nextBreakPoint()) {
+        positions.push(point.position);
+    }
+    expect(positions).toEqual([7, 11, content.indexOf('(Regolamento'), content.length]);
+});
+
 describe('line break extensions tests', () => {
     it('should allow an East Asian line to break before a smart opening quote', () => {
         const data = '力” 、“年度';
