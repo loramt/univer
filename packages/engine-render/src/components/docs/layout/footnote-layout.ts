@@ -484,6 +484,11 @@ export class DocumentFootnoteLayout {
                     if (row.height > capacity + 0.01 && capacity + 0.01 < available) {
                         heights[index] = capacity;
                         changed = true;
+                        // The pages after this one were measured with the lines this page now gives them: they are
+                        // measured again, from their whole height, once the row is laid out with this one (Word fills
+                        // each page with what the notes before it leave).
+                        heights.length = index + 1;
+                        break;
                     } else {
                         heights[index] = available;
                     }
