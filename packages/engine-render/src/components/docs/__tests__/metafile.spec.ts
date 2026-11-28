@@ -76,6 +76,31 @@ function excelLikeEmf(): Uint8Array {
     return bytes;
 }
 
+/** An EMF as PowerPoint writes a rounded rectangle: a path of moves, Bézier curves and lines, filled with a brush. */
+function pathEmf(): Uint8Array {
+    const records: number[][] = [];
+    const u32 = (value: number) => [value & 0xFF, (value >>> 8) & 0xFF, (value >>> 16) & 0xFF, (value >>> 24) & 0xFF];
+    const i32 = (value: number) => u32(value >>> 0);
+    const i16 = (value: number) => [value & 0xFF, (value >> 8) & 0xFF];
+    const record = (type: number, body: number[]) => records.push([...u32(type), ...u32(8 + body.length), ...body]);
+    record(1, [...i32(0), ...i32(0), ...i32(99), ...i32(49), ...i32(0), ...i32(0), ...i32(2646), ...i32(1323), ...u32(0x464D4520), ...u32(0x10000), ...u32(0), ...u32(0), ...u32(0), ...u32(0), ...u32(0), ...u32(0), ...i32(1000), ...i32(500), ...i32(265), ...i32(132), ...u32(0), ...u32(0), ...u32(0), ...u32(264583), ...u32(132292)]);
+    record(39, [...u32(1), ...u32(0), ...u32(0x00684F1F), ...u32(0)]);
+    record(37, u32(1));
+    const bezierTo = (points: number[]) => record(88, [...i32(0), ...i32(0), ...i32(0), ...i32(0), ...u32(points.length / 2), ...points.flatMap(i16)]);
+    record(59, []);
+    record(27, [...i32(10), ...i32(20)]);
+    bezierTo([10, 15, 15, 10, 20, 10]);
+    record(54, [...i32(80), ...i32(10)]);
+    bezierTo([85, 10, 90, 15, 90, 20]);
+    record(54, [...i32(90), ...i32(40)]);
+    record(54, [...i32(10), ...i32(40)]);
+    record(61, []);
+    record(60, []);
+    record(62, [...i32(0), ...i32(0), ...i32(99), ...i32(49)]);
+    record(14, [...u32(0), ...u32(16), ...u32(20)]);
+    return new Uint8Array(records.flat());
+}
+
 function recordingContext() {
     const calls: Array<{ op: string; args: unknown[]; fillStyle?: string; strokeStyle?: string; font?: string; lineWidth?: number }> = [];
     const ctx: Record<string, unknown> = { font: '', fillStyle: '', strokeStyle: '', lineWidth: 1 };
@@ -121,5 +146,20 @@ describe('Windows metafiles', () => {
         const scaleY = 100 / (emf.frame.bottom - emf.frame.top);
         expect(glyphs[0].font).toMatch(/^bold [\d.]+px "Calibri"$/);
         expect(Number.parseFloat(glyphs[0].font!.slice(5))).toBeCloseTo(15 * scaleY, 6);
+    });
+
+    it('fills a path of moves, Bézier curves and lines as one figure, as GDI traces it', () => {
+        // F1 of the third independent verification: each POLYBEZIERTO of the path of a rounded rectangle of PowerPoint
+        // started a figure of its own, and the fill left a skewed white shape inside the blue one
+        const emf = parseEmf(pathEmf())!;
+        const { ctx, calls } = recordingContext();
+        drawEmf(ctx, emf, { left: 0, top: 0, width: 100, height: 50 });
+        const fill = calls.findIndex((call) => call.op === 'fill');
+        const begin = calls.slice(0, fill).map((call) => call.op).lastIndexOf('beginPath');
+        const traced = calls.slice(begin, fill).map((call) => call.op);
+        expect(traced.filter((op) => op === 'moveTo')).toHaveLength(1);
+        expect(traced.filter((op) => op === 'bezierCurveTo')).toHaveLength(2);
+        expect(traced.filter((op) => op === 'lineTo')).toHaveLength(3);
+        expect(calls[fill].fillStyle).toBe('rgb(31,79,104)');
     });
 });

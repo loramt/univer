@@ -585,6 +585,8 @@ export function drawEmf(ctx: UniverRenderingContext, emf: IMetafile, frame: IMet
                     break;
                 case 27:
                     state.position = [i32(offset + 8), i32(offset + 12)];
+                    // in a path, a move starts a new figure there
+                    path?.push(['M', state.position]);
                     break;
                 case 33:
                     stack.push({ ...state, position: [...state.position], clip: state.clip ? state.clip.map((rect) => [...rect] as Rect) : null });
@@ -749,6 +751,7 @@ export function drawEmf(ctx: UniverRenderingContext, emf: IMetafile, frame: IMet
                     const points = readPoints(offset + 28, count, short);
                     const to = type === 5 || type === 88;
                     const all = to ? [state.position, ...points] : points;
+                    // in a path, POLYBEZIERTO goes on from the current point of the figure, POLYBEZIER starts one
                     const trace = () => {
                         if (!all.length) return;
                         const m = toCanvas(deviceMatrix());
@@ -762,7 +765,7 @@ export function drawEmf(ctx: UniverRenderingContext, emf: IMetafile, frame: IMet
                         }
                     };
                     if (path) {
-                        path.push(['B', all.flat()]);
+                        path.push(to ? ['C', points.flat()] : ['B', points.flat()]);
                     } else {
                         paintPath(trace, false, true);
                     }
@@ -771,6 +774,10 @@ export function drawEmf(ctx: UniverRenderingContext, emf: IMetafile, frame: IMet
                 }
                 case 59:
                     path = [];
+                    break;
+                case 68:
+                    // EMR_ABORTPATH: the path is dropped
+                    path = null;
                     break;
                 case 61:
                     path?.push(['Z', []]);
@@ -785,12 +792,14 @@ export function drawEmf(ctx: UniverRenderingContext, emf: IMetafile, frame: IMet
                         for (const [op, values] of recorded) {
                             if (op === 'Z') {
                                 ctx.closePath();
-                            } else if (op === 'B') {
+                            } else if (op === 'B' || op === 'C') {
+                                // B starts a figure at its first point, C goes on from the current point
                                 const pts: Array<[number, number]> = [];
                                 for (let i = 0; i + 1 < values.length; i += 2) pts.push(point(values[i], values[i + 1], m));
                                 if (!pts.length) continue;
-                                ctx.moveTo(pts[0][0], pts[0][1]);
-                                for (let i = 1; i + 2 < pts.length; i += 3) {
+                                const first = op === 'B' ? 1 : 0;
+                                if (op === 'B') ctx.moveTo(pts[0][0], pts[0][1]);
+                                for (let i = first; i + 2 < pts.length; i += 3) {
                                     ctx.bezierCurveTo(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], pts[i + 2][0], pts[i + 2][1]);
                                 }
                             } else {
