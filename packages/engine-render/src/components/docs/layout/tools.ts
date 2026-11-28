@@ -2118,6 +2118,12 @@ export interface ILayoutContext {
     modernHorizontalMargin?: number;
     // The initial layout skeleton, it will be the empty skeleton if it's the first layout.
     skeleton: IDocumentSkeletonCached;
+    /**
+     * The pages of the section being laid out, as far as its blocks have been laid out: the skeleton receives them
+     * only when the section ends, and a page that a block opened for the next one (a page break, a paragraph that
+     * starts a page) is the first page of that next block.
+     */
+    sectionPages?: IDocumentSkeletonPage[];
     // The position coordinates of the layout,
     // which are used to indicate which section and paragraph are currently layout,
     // and used to support the starting point of the reflow when re-layout.

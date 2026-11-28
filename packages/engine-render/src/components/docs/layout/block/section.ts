@@ -21,6 +21,7 @@ import type { ISectionBreakConfig } from '../../../../basics/interfaces';
 import type { DataStreamTreeNode } from '../../view-model/data-stream-tree-node';
 import type { DocumentViewModel } from '../../view-model/document-view-model';
 import type { ILayoutContext } from '../tools';
+import { DocumentSkeletonPageType } from '../../../../basics/i-document-skeleton-cached';
 import { createSkeletonPage, getNextSkeletonPageNumber } from '../model/page';
 import { dealWithBlockError } from './block-error';
 import { appendColumnGroupBlockLine, createColumnGroupSkeleton } from './column';
@@ -42,7 +43,28 @@ export function dealWithSection(
 ) {
     const allCurrentSkeletonPages: IDocumentSkeletonPage[] = [];
     const renderedBlockIdMap = new Map<string, boolean>();
+    const outerSectionPages = ctx.sectionPages;
+    if (curPage.type === DocumentSkeletonPageType.BODY && curPage.segmentId === '') {
+        ctx.sectionPages = allCurrentSkeletonPages;
+    }
+    try {
+        return _dealWithSectionBlocks(ctx, viewModel, sectionNode, curPage, sectionBreakConfig, layoutAnchor, allCurrentSkeletonPages, renderedBlockIdMap, options);
+    } finally {
+        ctx.sectionPages = outerSectionPages;
+    }
+}
 
+function _dealWithSectionBlocks(
+    ctx: ILayoutContext,
+    viewModel: DocumentViewModel,
+    sectionNode: DataStreamTreeNode,
+    curPage: IDocumentSkeletonPage,
+    sectionBreakConfig: ISectionBreakConfig,
+    layoutAnchor: Nullable<number>,
+    allCurrentSkeletonPages: IDocumentSkeletonPage[],
+    renderedBlockIdMap: Map<string, boolean>,
+    options?: IDealWithSectionOptions
+) {
     let paragraphStartIndex = options?.startParagraphIndex ?? 0;
 
     if (layoutAnchor != null) {

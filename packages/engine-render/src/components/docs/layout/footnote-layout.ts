@@ -823,12 +823,20 @@ export class DocumentFootnoteLayout {
         if (existing) {
             return existing;
         }
-        let pageIndex = currentPages.indexOf(page);
+        const pageIndex = currentPages.indexOf(page);
         let previous = pageIndex > 0 ? currentPages[pageIndex - 1] : undefined;
         if (!previous) {
-            const pages = this._ctx.skeleton.pages;
-            pageIndex = pages.indexOf(page);
-            previous = pageIndex > 0 ? pages[pageIndex - 1] : pages[pages.length - 1];
+            // The first page of a block's pages: the page before it is among the pages laid out before the block,
+            // those of the sections before (the skeleton's) and those of this section so far, which reach the
+            // skeleton only when the section ends (a page that a page break opened is the first of the next block).
+            const laidOut = this._ctx.skeleton.pages;
+            let pages = laidOut;
+            if (this._ctx.sectionPages?.length) {
+                const known = new Set(laidOut);
+                pages = [...laidOut, ...this._ctx.sectionPages.filter((item) => !known.has(item))];
+            }
+            const index = pages.indexOf(page);
+            previous = index > 0 ? pages[index - 1] : index < 0 ? pages[pages.length - 1] : undefined;
             if (previous === page) {
                 previous = undefined;
             }

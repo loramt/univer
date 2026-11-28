@@ -118,6 +118,43 @@ describe('footnote body layout', () => {
         }
     });
 
+    it('keeps a note that continues after a page break, on the page the break opens', () => {
+        // Word continues a note on the next page also when a page break ends the page of its reference.
+        const lines = Array.from({ length: 8 }, (_, index) => `Line ${index + 1}\r`).join('');
+        const content = `${lines}Reference￼\r\f\rAfter the break`;
+        const reference = lines.length + 9;
+        const noteStream = `${Array.from({ length: 30 }, (_, i) => `Explanation ${i + 1} with enough text to wrap onto another line.\r`).join('')}\n`;
+        const bed = createParagraphLayoutTestBed(content, {
+            documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL, pageSize: { width: 400, height: 400 } },
+            body: {
+                dataStream: `${content}\r\n`,
+                paragraphs: [...`${content}\r`.matchAll(/\r/g)].map((match, index) => ({ startIndex: match.index!, paragraphId: `p-${index}` })),
+                sectionBreaks: [{ sectionId: 'main', startIndex: content.length + 1 }],
+                customRanges: [{ rangeId: 'reference', rangeType: CustomRangeType.FOOTNOTE, startIndex: reference, endIndex: reference, wholeEntity: true, properties: { noteId: 'note' } }],
+            },
+            notes: {
+                note: { type: 'footnote' as const, noteId: 'note', body: {
+                    dataStream: noteStream,
+                    paragraphs: [...noteStream.matchAll(/\r/g)].map((match, index) => ({ paragraphId: `note-${index}`, startIndex: match.index! })),
+                    sectionBreaks: [{ sectionId: 'note-section', startIndex: noteStream.length - 1 }],
+                } },
+            },
+        });
+        const skeleton = DocumentSkeleton.create(bed.viewModel, bed.ctx.docsConfig.localeService);
+        try {
+            skeleton.calculate();
+            const pages = skeleton.getSkeletonData()!.pages;
+            const fragments = pages.flatMap((page) => page.notes ?? []);
+            expect(fragments.length).toBeGreaterThan(1);
+            expect(fragments.flatMap((fragment) => getPageGlyphs(fragment.page)).filter((glyph) => glyph.count > 0).map((glyph) => glyph.raw).join('')).toBe(noteStream);
+            const after = pages.findIndex((page) => getPageGlyphs(page).some((glyph) => glyph.raw === 'A'));
+            expect(pages[after].notes?.some((fragment) => fragment.continued)).toBe(true);
+        } finally {
+            bed.viewModel.dispose();
+            bed.dataModel.dispose();
+        }
+    });
+
     it('reserves inherited paragraph after-spacing at the end of a note', () => {
         const bed = createParagraphLayoutTestBed('Reference\uFFFC', {
             documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL, defaultParagraphStyle: { spaceBelow: { v: 13 } } },
