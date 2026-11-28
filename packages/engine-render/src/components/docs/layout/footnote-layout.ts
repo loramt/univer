@@ -557,7 +557,10 @@ export class DocumentFootnoteLayout {
                             split: line.top + (cell.marginBottom ?? 0),
                             atTop: line.top <= (cell.marginTop ?? 0) + 0.01,
                         })))
-                        .filter((line) => line.bottom <= available)
+                        // A part laid out within its room holds all of its lines: the last one of a nested table,
+                        // with the margins of its cells, may reach past the part (the verifier's probe v8-c54: 953.76
+                        // in a part of 951.79), and its note was left out of the page, which then had no room for it.
+                        .filter((line) => row.height <= available + 0.01 || line.bottom <= available)
                         .sort((left, right) => left.bottom - right.bottom);
                     const incoming = lines.flatMap((line) => line.glyphs);
                     if (onCurrentPage) {
