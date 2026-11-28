@@ -310,8 +310,6 @@ export class DocumentFootnoteLayout {
     private readonly _references = new Map<string, INoteReferenceLayout>();
     private readonly _referencePageBreaks = new Map<number, Map<number, number>>();
     private readonly _decorations = new Map<string, IDocumentSkeletonPage | undefined>();
-    /** The pages of a split table row given back their whole height once, by row: see measureRow. */
-    private readonly _restoredRowPages = new WeakMap<object, Set<number>>();
 
     constructor(private readonly _ctx: ILayoutContext) {
         for (const reference of _ctx.noteReferences?.values() ?? []) {
@@ -448,19 +446,13 @@ export class DocumentFootnoteLayout {
                     measurePages.push(measurePage);
                 }
                 const heights = [...(previousHeights ?? [])];
-                const rowSource = rows[0]?.rowSource as object | undefined;
-                const restored = rowSource == null ? new Set<number>() : this._restoredRowPages.get(rowSource) ?? new Set<number>();
-                if (rowSource != null) {
-                    this._restoredRowPages.set(rowSource, restored);
-                }
                 let changed = false;
                 for (let index = 0; index < rows.length; index++) {
                     const row = rows[index];
                     const onCurrentPage = index === 0 && !startsOnNextPage;
                     const offset = onCurrentPage ? top + table.height : 0;
                     const contentHeight = measurePage.pageHeight - measurePage.marginTop - measurePage.marginBottom;
-                    const fullAvailable = contentHeight - offset;
-                    const available = heights[index] ?? fullAvailable;
+                    const available = heights[index] ?? contentHeight - offset;
                     const lines = row.cells
                         // A fragment that ends before a line also keeps the bottom margin of the line's cell.
                         .flatMap((cell) => collectCellReferenceLines(cell).map((line) => ({
@@ -491,18 +483,6 @@ export class DocumentFootnoteLayout {
                     );
                     if (row.height > capacity + 0.01 && capacity + 0.01 < available) {
                         heights[index] = capacity;
-                        changed = true;
-                    } else if (
-                        available < fullAvailable - 0.01 &&
-                        incoming.length === 0 &&
-                        this._getInherited(measurePage, measurePages, config).fragments.length === 0 &&
-                        !restored.has(index)
-                    ) {
-                        // A page shortened for notes whose references have since moved to another page (its lines
-                        // went to the next page, or came back to the one before) has none left: it takes its whole
-                        // height again, as in Word, once, so that the row settles.
-                        restored.add(index);
-                        heights[index] = fullAvailable;
                         changed = true;
                     } else {
                         heights[index] = available;
