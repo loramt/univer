@@ -267,6 +267,67 @@ describe('footnote body layout', () => {
         }
     });
 
+    it('splits a row that fits but not with its note, and never leaves its reference line alone at the foot of a page', () => {
+        // Word's probes righe-orfane and righe-minime-note: a row of five lines below some paragraphs, with a one-line
+        // note referenced in its first line. Where its first lines and the note fit, Word splits the row there, as
+        // it does a row taller than the page; where only the reference line would fit with its note, it moves the
+        // whole row to the next page, and lays it out there in full.
+        const T = DataStreamTreeTokenType;
+        const cellText = `${Array.from({ length: 5 }, (_, paragraph) => `Cell ${paragraph + 1}${paragraph === 0 ? '￼' : ''}${T.PARAGRAPH}`).join('')}${T.SECTION_BREAK}`;
+        const tableStream = `${T.TABLE_START}${T.TABLE_ROW_START}${T.TABLE_CELL_START}${cellText}${T.TABLE_CELL_END}${T.TABLE_ROW_END}${T.TABLE_END}`;
+        const noteStream = 'One line note\r\n';
+        const outcomes = new Set<string>();
+        for (let before = 26; before <= 36; before++) {
+            const prefix = Array.from({ length: before }, (_, index) => `Line ${index}\r`).join('');
+            const dataStream = `${prefix}${tableStream}\r\n`;
+            const reference = dataStream.indexOf('￼');
+            const bed = createParagraphLayoutTestBed('', {
+                documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL, pageSize: { width: 400, height: 400 } },
+                body: {
+                    dataStream,
+                    paragraphs: [...dataStream.matchAll(/\r/g)].map((match, index) => ({ startIndex: match.index!, paragraphId: `p-${index}` })),
+                    sectionBreaks: [{ sectionId: 'main', startIndex: dataStream.length - 1 }],
+                    tables: [{ tableId: 'table', startIndex: prefix.length, endIndex: prefix.length + tableStream.length }],
+                    customRanges: [{ rangeId: 'reference', rangeType: CustomRangeType.FOOTNOTE, startIndex: reference, endIndex: reference, wholeEntity: true, properties: { noteId: 'note' } }],
+                },
+                tableSource: {
+                    table: {
+                        tableId: 'table',
+                        align: 0,
+                        indent: { v: 0 },
+                        textWrap: 0,
+                        size: { type: 0, width: { v: 300 } },
+                        tableRows: [{ cantSplit: 0, tableCells: [{ size: { type: 0, width: { v: 300 } } }], trHeight: { val: { v: 0 }, hRule: 0 } }],
+                        tableColumns: [{ size: { type: 0, width: { v: 300 } } }],
+                    },
+                },
+                notes: { note: { type: 'footnote' as const, noteId: 'note', body: {
+                    dataStream: noteStream,
+                    paragraphs: [{ paragraphId: 'note-0', startIndex: noteStream.length - 2 }],
+                    sectionBreaks: [{ sectionId: 'note-section', startIndex: noteStream.length - 1 }],
+                } } },
+            });
+            const skeleton = DocumentSkeleton.create(bed.viewModel, bed.ctx.docsConfig.localeService);
+            try {
+                skeleton.calculate();
+                const pages = skeleton.getSkeletonData()!.pages;
+                const cellLines = pages.map((page) => [...page.skeTables.values()].flatMap((table) => table.rows.flatMap((row) => row.cells.flatMap((cell) =>
+                    cell.sections.flatMap((section) => section.columns.flatMap((column) => column.lines))))).length);
+                const first = cellLines.findIndex((count) => count > 0);
+                const notePage = pages.findIndex((page) => (page.notes ?? []).some((note) => note.noteId === 'note'));
+                // the reference and its note are on the same page, with at least another line of the row
+                expect(notePage).toBe(first);
+                expect(cellLines[first]).toBeGreaterThanOrEqual(2);
+                outcomes.add(cellLines[first] === 5 ? `whole on page ${first + 1}` : 'split');
+            } finally {
+                bed.viewModel.dispose();
+                bed.dataModel.dispose();
+            }
+        }
+        expect(outcomes.has('split')).toBe(true);
+        expect([...outcomes].some((outcome) => outcome === 'whole on page 2')).toBe(true);
+    });
+
     it('reserves inherited paragraph after-spacing at the end of a note', () => {
         const bed = createParagraphLayoutTestBed('Reference\uFFFC', {
             documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL, defaultParagraphStyle: { spaceBelow: { v: 13 } } },

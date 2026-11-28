@@ -561,6 +561,8 @@ interface ICreateTableCache {
      * of the table fitted is not kept, so the number of slices does not count the pages.
      */
     slicePageOffset?: number;
+    /** A row whose first part could not stay with its notes on its page: it is laid out as opening the next page. */
+    rowOpensNextPage?: number;
     repeatRows: DataStreamTreeNode[];
     repeatRowsHeight: number;
     notes?: ReturnType<DocumentFootnoteLayout['createTablePagination']>;
@@ -946,7 +948,7 @@ function getTableRowPageHeights(
     const availableHeight = getAvailableHeight(curPage, cache, true) - newRowBorderHeight;
     const minimumHeight = traditional && rowSource.trHeight.hRule === TableRowHeightRule.AT_LEAST ? getRowMinimumHeight(table, row, true) : 0;
     // An oversized minimum must not prevent a row from splitting across pages.
-    const needOpenNewTable = cache.remainHeight <= firstBorderHeight ||
+    const needOpenNewTable = cache.remainHeight <= firstBorderHeight || cache.rowOpensNextPage === row ||
         (minimumHeight <= availableHeight && minimumHeight + firstBorderHeight > cache.remainHeight);
     const firstCellPageHeight = canRowSplit && !needOpenNewTable ? cache.remainHeight - firstBorderHeight : availableHeight;
     return { opensNewPage: canRowSplit && needOpenNewTable, firstBorderHeight, nextBorderHeight, minimumHeight, firstCellPageHeight, pageContentHeight, availableHeight, canRowSplit, suppressContinuationTopSpacing };
@@ -1191,7 +1193,14 @@ function dealWithTableRow(
         let nextHeights: number[] | undefined;
         if (canRowSplit) {
             // A row that starts the next page is measured against that page, not against what is left of this one.
-            nextHeights = cache.notes.measureRow(curTableSkeleton, rowSkeletons, cellPageHeights, opensNewPage, [firstBorderHeight, nextBorderHeight]);
+            const measured = cache.notes.measureRow(curTableSkeleton, rowSkeletons, cellPageHeights, opensNewPage, [firstBorderHeight, nextBorderHeight]);
+            if (measured === 'next-page') {
+                // Its first part cannot end on this page: the row is laid out again as opening the next one.
+                cache.rowOpensNextPage = row;
+                nextHeights = [];
+            } else {
+                nextHeights = measured;
+            }
         } else if (cache.notes.renumberWholeRow(curTableSkeleton, rowSkeletons, cache.remainHeight)) {
             nextHeights = [];
         }
@@ -1214,6 +1223,7 @@ function dealWithTableRow(
         _verticalAlignInCell(rowSkeleton, rowSource, isSplitRow);
     }
 
+    let firstPart = true;
     while (rowSkeletons.length > 0) {
         const rowSkeleton = rowSkeletons.shift()!;
         const lastRow = curTableSkeleton.rows[curTableSkeleton.rows.length - 1];
@@ -1228,6 +1238,17 @@ function dealWithTableRow(
             rowOverflowHeight > rowOverflowTolerance;
         let remainingWithNotes = geometryOverflow ? undefined : cache.notes?.append(curTableSkeleton, rowSkeleton, borderHeight);
         const shouldOpenNewTable = geometryOverflow || (cache.notes != null && remainingWithNotes == null);
+
+        if (shouldOpenNewTable && firstPart && !geometryOverflow && rowSkeletons.length > 0 && !opensNewPage &&
+            !isRepeatRow && cache.rowOpensNextPage !== row) {
+            // The first part of a row that splits cannot stay with its notes on this page. It was measured for what
+            // is left of the page: on the next page it would keep that height and leave the rest of the row to the
+            // page after. The row is laid out again as opening the next page, where Word moves it whole (probe
+            // righe-minime-note).
+            cache.rowOpensNextPage = row;
+            return [];
+        }
+        firstPart = false;
 
         if (shouldOpenNewTable) {
             // Every new slice is on the next page, also after a page where no row of the table fitted (a table that

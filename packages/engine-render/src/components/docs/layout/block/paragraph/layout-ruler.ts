@@ -30,6 +30,7 @@ import {
     PositionedObjectLayoutType,
     SectionType,
     SpacingRule,
+    TableRowHeightRule,
     TableTextWrapType,
     TabStopAlignment,
     WrapStrategy,
@@ -2702,6 +2703,7 @@ function _updateAndPositionTable(
     // A short table and its note must move together. Waiting until the trailing
     // paragraph overflows leaves the table on the old page without its note.
     // Tables that already exceed the remaining body space still use row pagination below.
+    let splitsForNotes = false;
     if (ctx.footnoteLayout && localTop + height <= section.height && (column.lines.length > 0 || firstUnPositionedTable.isSlideTable) &&
         tableSource.textWrap === TableTextWrapType.NONE) {
         const bodyLimit = ctx.footnoteLayout.getTableBodyLimit(page, pages, sectionBreakConfig, table);
@@ -2712,7 +2714,13 @@ function _updateAndPositionTable(
             const previousLine = column.lines[column.lines.length - 1];
             const bodyBottom = previousLine ? section.top + previousLine.top + previousLine.lineHeight : section.top;
             ctx.footnoteLayout.getBodyLimit(page, pages, sectionBreakConfig, bodyBottom);
-            return true;
+            // Word splits a row that fits on the page but not with its notes, where its lines and their notes fit
+            // (probe righe-orfane); a table without rows that can split moves to the next page with its notes.
+            if (firstUnPositionedTable.isSlideTable || !isTraditionalDocumentCompatibility(sectionBreakConfig.documentCompatibilityPolicy) ||
+                !tableSource.tableRows.some((row) => row.cantSplit !== BooleanNumber.TRUE && row.trHeight?.hRule !== TableRowHeightRule.EXACT)) {
+                return true;
+            }
+            splitsForNotes = true;
         }
     }
     // Word ends the page's body with the line of a reference whose note continues on the next page: a table that
@@ -2738,7 +2746,7 @@ function _updateAndPositionTable(
         (tableSource.textWrap === TableTextWrapType.NONE ||
             (page.type === DocumentSkeletonPageType.BODY &&
                 isTraditionalDocumentCompatibility(sectionBreakConfig.documentCompatibilityPolicy))) &&
-        ((localTop + height > section.height && !fitsPhysicalPage && !legacyFloatingTable) || table.hasPageBreak === true || continuesNote) &&
+        ((localTop + height > section.height && !fitsPhysicalPage && !legacyFloatingTable) || table.hasPageBreak === true || continuesNote || splitsForNotes) &&
         firstUnPositionedTable.isSlideTable === false
     ) {
         if (tableSource.textWrap === TableTextWrapType.WRAP &&

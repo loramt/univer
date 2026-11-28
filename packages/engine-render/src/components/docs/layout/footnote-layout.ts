@@ -279,6 +279,26 @@ function collectCellReferenceLines(page: IDocumentSkeletonPage, offset = 0): { t
     return lines;
 }
 
+/** How many lines of a cell page end within the given height, those of the tables inside it included. */
+function countCellLinesWithin(page: IDocumentSkeletonPage, height: number, offset = 0): number {
+    let count = 0;
+    for (const section of page.sections) {
+        for (const column of section.columns) {
+            for (const line of column.lines) {
+                if (offset + page.marginTop + section.top + line.top + line.lineHeight <= height + 0.01) {
+                    count++;
+                }
+            }
+        }
+    }
+    for (const table of page.skeTables.values()) {
+        for (const row of table.rows) {
+            count += row.cells.reduce((total, cell) => total + countCellLinesWithin(cell, height, offset + page.marginTop + table.top + row.top), 0);
+        }
+    }
+    return count;
+}
+
 /** A line of a table row that holds note references, in the coordinates of its cell page. */
 export interface INoteReferenceLine {
     top: number;
@@ -464,7 +484,7 @@ export class DocumentFootnoteLayout {
              * outer borders add to a slice that ends with the first part and with a later one: the notes are measured
              * below the slice as it is laid out on the page.
              */
-            measureRow: (table: IDocumentSkeletonTable, rows: IDocumentSkeletonTable['rows'], previousHeights?: readonly number[], startsOnNextPage = false, borders: readonly [number, number] = [0, 0]): number[] | undefined => {
+            measureRow: (table: IDocumentSkeletonTable, rows: IDocumentSkeletonTable['rows'], previousHeights?: readonly number[], startsOnNextPage = false, borders: readonly [number, number] = [0, 0]): number[] | 'next-page' | undefined => {
                 let measurePage = { ...current, skeTables: new Map(current.skeTables) };
                 const measurePages = [measurePage];
                 this._inherited.set(measurePage, this._getInherited(current, pages, config));
@@ -491,6 +511,7 @@ export class DocumentFootnoteLayout {
                         // A fragment that ends before a line also keeps the bottom margin of the line's cell.
                         .flatMap((cell) => collectCellReferenceLines(cell).map((line) => ({
                             ...line,
+                            cell,
                             split: line.top + (cell.marginBottom ?? 0),
                             atTop: line.top <= (cell.marginTop ?? 0) + 0.01,
                         })))
@@ -515,6 +536,15 @@ export class DocumentFootnoteLayout {
                             return { limit, deferredIds };
                         }
                     );
+                    // Word does not end the first part of a row, below other content of the page, with a single line
+                    // of a cell that holds a note reference there: the row goes to the next page (probes
+                    // righe-minime-note and righe-orfane; the Mosaico of Golden Group, page 183). A single line without
+                    // a reference, or two lines with one, end the part (righe-orfane D1, D3, D5).
+                    const partHeight = Math.min(capacity, row.height);
+                    if (onCurrentPage && offset > 0.01 && (rows.length > 1 || row.height > capacity + 0.01) &&
+                        lines.some((line) => line.bottom <= partHeight + 0.01 && countCellLinesWithin(line.cell, partHeight) < 2)) {
+                        return 'next-page';
+                    }
                     if (row.height > capacity + 0.01 && capacity + 0.01 < available) {
                         heights[index] = capacity;
                         changed = true;
