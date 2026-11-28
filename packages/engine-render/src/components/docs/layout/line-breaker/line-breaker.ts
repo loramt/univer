@@ -18,7 +18,7 @@ import type { Nullable } from '@univerjs/core';
 import { BooleanNumber } from '@univerjs/core';
 import type { ILineBreakRule } from './rule';
 import { Break, BreakPointType } from './break';
-import { AI, AL, B2, BA, BK, CJ, CR, H2, H3, HL, HY, ID, JL, JT, JV, LF, NL, NS, OP, QU, RI, SA, SG, SP, WJ, XX, ZWJ } from './classes';
+import { AI, AL, B2, BA, BK, CB, CJ, CR, H2, H3, HL, HY, ID, JL, JT, JV, LF, NL, NS, OP, QU, RI, SA, SG, SP, WJ, XX, ZWJ } from './classes';
 import { CI_BRK, CP_BRK, DI_BRK, IN_BRK, pairTable, PR_BRK } from './pairs';
 import { Rule } from './rule';
 import data from './trie-data';
@@ -252,7 +252,20 @@ export class LineBreaker implements IBreakPoints {
  * and the hyphen (BA, HY): "office—fly" ends a line as "office—", never as "office" with "—fly" below. After a
  * space the break before the dash stays, as for the other dashes.
  */
+/**
+ * The character a note reference stands on in a document (U+FFFC, the only character of class CB) sticks to the text
+ * around it as a letter does: Word keeps 'FAQ³' and 'd’imposta.³' whole at the end of a line (Mosaico of Golden
+ * Group, page 53), where UAX #14 breaks before a contingent break.
+ */
+function noteReferenceClass(charClass: number, codePoint: Nullable<number>): number {
+    return charClass === CB && codePoint === 0xFFFC ? AL : charClass;
+}
+
 export class WordLineBreaker extends LineBreaker {
+    protected override _nextCharClass() {
+        return noteReferenceClass(super._nextCharClass(), this._codePoint);
+    }
+
     protected override _pairBreak(curClass: number, nextClass: number): number {
         const pair = pairTable[curClass][nextClass];
         if (nextClass === B2 && pair === DI_BRK && pairTable[curClass][BA] === IN_BRK) {
@@ -294,6 +307,6 @@ export class DocumentLineBreaker extends WordLineBreaker {
             && !/^ko(?:-|$)/i.test(this._languageAt?.(offset) ?? '')) {
             return ID;
         }
-        return mapClass(rawClass);
+        return noteReferenceClass(mapClass(rawClass), nextCodePoint);
     }
 }

@@ -184,6 +184,18 @@ it('breaks at the space between a closing quotation mark and an opening bracket 
     expect(positions).toEqual([7, 11, content.indexOf('(Regolamento'), content.length]);
 });
 
+it('keeps a note reference with the word before it in documents, as Word', () => {
+    // Word 365 (Mosaico of Golden Group, page 53) keeps 'la FAQ³' whole at the end of a line; the reference stands on
+    // U+FFFC, which UAX #14 breaks around.
+    const content = 'la FAQ\uFFFC pubblicata';
+    const breaker = new WordLineBreaker(content);
+    const positions: number[] = [];
+    for (let point = breaker.nextBreakPoint(); point; point = breaker.nextBreakPoint()) {
+        positions.push(point.position);
+    }
+    expect(positions).toEqual([3, content.indexOf('pubblicata'), content.length]);
+});
+
 describe('line break extensions tests', () => {
     it('should allow an East Asian line to break before a smart opening quote', () => {
         const data = '力” 、“年度';
