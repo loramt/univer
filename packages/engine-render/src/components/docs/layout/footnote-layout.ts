@@ -198,25 +198,6 @@ interface IPageFootnoteLayout {
     height: number;
     separator?: IDocumentSkeletonPage;
     notice?: IDocumentSkeletonPage;
-    /**
-     * Where the body of the page ends when a note that starts on the page continues on the next one: Word puts
-     * nothing of the body below the line that holds its reference, even when the note leaves room there.
-     */
-    bodyEnd?: number;
-}
-
-/** Whether a note that starts in the plan's notes continues on the next page. */
-function continuesOwnNote(plan: IPageFootnoteLayout): boolean {
-    return plan.following[0]?.some((fragment) => fragment.continued &&
-        plan.fragments.some((own) => !own.continued && own.noteId === fragment.noteId)) === true;
-}
-
-/**
- * Where the body of the page may end with the plan's notes below it. A note that continues takes the whole page below
- * the line of its reference (its last line may go up to 2 px further, as lines do), and the body ends with that line.
- */
-function planBodyLimit(contentHeight: number, plan: IPageFootnoteLayout): number {
-    return plan.bodyEnd ?? contentHeight - plan.height;
 }
 
 type FootnoteDecorationKind = IDocumentSkeletonNoteDecoration['kind'];
@@ -564,7 +545,7 @@ export class DocumentFootnoteLayout {
         if (previous && previous.referenceIds.length === referenceIds.length &&
             previous.referenceIds.every((id, index) => id === referenceIds[index])) {
             this._position(page, previous, bodyBottom);
-            return planBodyLimit(contentHeight, previous);
+            return contentHeight - previous.height;
         }
 
         const firstReference = this._references.get(inherited.fragments[0]?.noteId ?? referenceIds[0]);
@@ -592,43 +573,9 @@ export class DocumentFootnoteLayout {
                 }
             }
         }
-        // Word ends the page's body with the line of a reference whose note continues on the next page (probe
-        // note-continuate: plain paragraphs and a table row that would fit; the Mosaico of Golden Group, page 263).
-        if (continuesOwnNote(plan)) {
-            plan.bodyEnd = bodyBottom;
-        }
         this._pages.set(page, plan);
         this._position(page, plan, bodyBottom);
-        return planBodyLimit(contentHeight, plan);
-    }
-
-    /**
-     * Whether a note that the table references would continue on the next page if the table were laid out whole on
-     * the page: Word ends the page with the line of its reference, so the table is laid out row by row. Measured on
-     * a copy of the page, whose notes stay as they are.
-     */
-    tableContinuesNote(
-        page: IDocumentSkeletonPage,
-        currentPages: IDocumentSkeletonPage[],
-        config: ISectionBreakConfig,
-        table: IDocumentSkeletonTable
-    ): boolean {
-        if (page.type !== DocumentSkeletonPageType.BODY || page.segmentId !== '') {
-            return false;
-        }
-        const references = table.rows.flatMap((row) => row.cells.flatMap(collectPageReferenceGlyphs));
-        if (!references.some((glyph) => glyph.noteId && this._references.has(glyph.noteId))) {
-            return false;
-        }
-        const probe = { ...page, skeTables: new Map(page.skeTables) };
-        this._inherited.set(probe, this._getInherited(page, currentPages, config));
-        const accepted = this._pages.get(page);
-        if (accepted) {
-            this._pages.set(probe, accepted);
-        }
-        this.getBodyLimit(probe, [probe], config, table.top + table.height, references);
-        const plan = this._pages.get(probe);
-        return plan != null && continuesOwnNote(plan);
+        return contentHeight - plan.height;
     }
 
     finish(pages: IDocumentSkeletonPage[], config: ISectionBreakConfig): void {

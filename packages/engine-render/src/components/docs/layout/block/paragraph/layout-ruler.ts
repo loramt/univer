@@ -2700,12 +2700,6 @@ function _updateAndPositionTable(
             return true;
         }
     }
-    // Word ends the page's body with the line of a reference whose note continues on the next page: a table that
-    // would fit whole, with such a note, is laid out row by row, and the row with the reference ends with its line.
-    const continuesNote = ctx.footnoteLayout != null && localTop + height <= section.height &&
-        tableSource.textWrap === TableTextWrapType.NONE && firstUnPositionedTable.isSlideTable === false &&
-        isTraditionalDocumentCompatibility(sectionBreakConfig.documentCompatibilityPolicy) &&
-        ctx.footnoteLayout.tableContinuesNote(page, pages, sectionBreakConfig, table);
 
     const verticalPosition = tableSource.position?.positionV;
     const usesPhysicalPageBounds = tableSource.textWrap === TableTextWrapType.WRAP &&
@@ -2723,7 +2717,7 @@ function _updateAndPositionTable(
         (tableSource.textWrap === TableTextWrapType.NONE ||
             (page.type === DocumentSkeletonPageType.BODY &&
                 isTraditionalDocumentCompatibility(sectionBreakConfig.documentCompatibilityPolicy))) &&
-        ((localTop + height > section.height && !fitsPhysicalPage && !legacyFloatingTable) || table.hasPageBreak === true || continuesNote) &&
+        ((localTop + height > section.height && !fitsPhysicalPage && !legacyFloatingTable) || table.hasPageBreak === true) &&
         firstUnPositionedTable.isSlideTable === false
     ) {
         if (tableSource.textWrap === TableTextWrapType.WRAP &&
