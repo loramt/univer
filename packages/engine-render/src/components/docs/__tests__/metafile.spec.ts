@@ -101,10 +101,45 @@ function pathEmf(): Uint8Array {
     return new Uint8Array(records.flat());
 }
 
+/** The table of excelLikeEmf with its text in a font turned by 90 degrees, as Excel writes a turned cell. */
+function turnedTextEmf(): Uint8Array {
+    const bytes = excelLikeEmf();
+    const view = new DataView(bytes.buffer);
+    // the escapement of the font record (EMR_EXTCREATEFONTINDIRECTW, type 82): 900 tenths of a degree
+    for (let offset = 0; offset + 8 <= bytes.length;) {
+        const type = view.getUint32(offset, true);
+        const size = view.getUint32(offset + 4, true);
+        if (type === 82) {
+            view.setInt32(offset + 20, 900, true);
+        }
+        offset += size;
+    }
+    return bytes;
+}
+
+/** A dotted line as Excel draws its dotted borders: a pattern copy, one pixel high, with a pattern of dots. */
+function dottedEmf(): Uint8Array {
+    const records: number[][] = [];
+    const u32 = (value: number) => [value & 0xFF, (value >>> 8) & 0xFF, (value >>> 16) & 0xFF, (value >>> 24) & 0xFF];
+    const i32 = (value: number) => u32(value >>> 0);
+    const record = (type: number, body: number[]) => records.push([...u32(type), ...u32(8 + body.length), ...body]);
+    record(1, [...i32(0), ...i32(0), ...i32(99), ...i32(49), ...i32(0), ...i32(0), ...i32(2646), ...i32(1323), ...u32(0x464D4520), ...u32(0x10000), ...u32(0), ...u32(0), ...u32(0), ...u32(0), ...u32(0), ...u32(0), ...i32(1000), ...i32(500), ...i32(265), ...i32(132), ...u32(0), ...u32(0), ...u32(0), ...u32(264583), ...u32(132292)]);
+    // EMR_CREATEDIBPATTERNBRUSHPT: an 8 x 8 bitmap of one bit, black and white, every other pixel set
+    const info = [...u32(40), ...i32(8), ...i32(8), 1, 0, 1, 0, ...u32(0), ...u32(32), ...i32(0), ...i32(0), ...u32(2), ...u32(0)];
+    const palette = [0, 0, 0, 0, 255, 255, 255, 0];
+    const bits = new Array(8).fill([0x55, 0, 0, 0]).flat();
+    record(94, [...u32(1), ...u32(0), ...u32(32), ...u32(48), ...u32(80), ...u32(32), ...info, ...palette, ...bits]);
+    record(37, u32(1));
+    // EMR_BITBLT PATCOPY of 8 x 1 pixels, without a source
+    record(76, [...i32(0), ...i32(0), ...i32(7), ...i32(0), ...i32(0), ...i32(10), ...i32(8), ...i32(1), ...u32(0x00F00021), ...i32(0), ...i32(0), ...new Array(24).fill(0), ...u32(0), ...u32(0), ...u32(0), ...u32(0), ...u32(0), ...u32(0)]);
+    record(14, [...u32(0), ...u32(16), ...u32(20)]);
+    return new Uint8Array(records.flat());
+}
+
 function recordingContext() {
     const calls: Array<{ op: string; args: unknown[]; fillStyle?: string; strokeStyle?: string; font?: string; lineWidth?: number }> = [];
     const ctx: Record<string, unknown> = { font: '', fillStyle: '', strokeStyle: '', lineWidth: 1 };
-    for (const op of ['save', 'restore', 'beginPath', 'rect', 'clip', 'moveTo', 'lineTo', 'stroke', 'fill', 'fillRect', 'fillText', 'closePath', 'setLineDash', 'bezierCurveTo', 'ellipse', 'drawImage']) {
+    for (const op of ['save', 'restore', 'beginPath', 'rect', 'clip', 'moveTo', 'lineTo', 'stroke', 'fill', 'fillRect', 'fillText', 'closePath', 'setLineDash', 'bezierCurveTo', 'ellipse', 'drawImage', 'translate', 'rotate']) {
         ctx[op] = vi.fn((...args: unknown[]) => calls.push({ op, args, fillStyle: ctx.fillStyle as string, strokeStyle: ctx.strokeStyle as string, font: ctx.font as string, lineWidth: ctx.lineWidth as number }));
     }
     ctx.measureText = vi.fn(() => ({ width: 10, fontBoundingBoxAscent: 12, fontBoundingBoxDescent: 3 }));
@@ -146,6 +181,34 @@ describe('Windows metafiles', () => {
         const scaleY = 100 / (emf.frame.bottom - emf.frame.top);
         expect(glyphs[0].font).toMatch(/^bold [\d.]+px "Calibri"$/);
         expect(Number.parseFloat(glyphs[0].font!.slice(5))).toBeCloseTo(15 * scaleY, 6);
+    });
+
+    it('copies a pattern brush pixel by pixel, as the dotted borders of Excel', () => {
+        // F3 of the third independent verification: the dotted borders came out as full grey lines
+        const emf = parseEmf(dottedEmf())!;
+        const { ctx, calls } = recordingContext();
+        drawEmf(ctx, emf, { left: 0, top: 0, width: 100, height: 50 });
+        const dots = calls.filter((call) => call.op === 'fillRect');
+        expect(dots.map((call) => call.fillStyle)).toEqual(['rgb(0,0,0)', 'rgb(255,255,255)', 'rgb(0,0,0)', 'rgb(255,255,255)', 'rgb(0,0,0)', 'rgb(255,255,255)', 'rgb(0,0,0)', 'rgb(255,255,255)']);
+        const scale = 100 / (emf.frame.right - emf.frame.left);
+        expect(dots[1].args[0]).toBeCloseTo(1 * scale);
+        expect(dots[1].args[2]).toBeCloseTo(scale);
+    });
+
+    it('writes the text of a turned font along its turned baseline', () => {
+        // F2 of the third independent verification: the text of Excel turned by 90 degrees in a cell came out flat
+        const emf = parseEmf(turnedTextEmf())!;
+        const { ctx, calls } = recordingContext();
+        drawEmf(ctx, emf, { left: 10, top: 20, width: 200, height: 100 });
+        const turn = calls.find((call) => call.op === 'rotate');
+        expect(turn?.args[0]).toBeCloseTo(-Math.PI / 2);
+        const scale = 200 / (emf.frame.right - emf.frame.left);
+        const at = calls.findIndex((call) => call.op === 'rotate');
+        const moved = calls.slice(0, at).filter((call) => call.op === 'translate').at(-1);
+        expect(moved?.args[0]).toBeCloseTo(10 + 4 * scale);
+        expect(moved?.args[1]).toBeCloseTo(20 + 25 * scale);
+        const glyphs = calls.filter((call) => call.op === 'fillText');
+        expect(glyphs.map((call) => call.args[1])).toEqual([0, 9 * scale]);
     });
 
     it('fills a path of moves, Bézier curves and lines as one figure, as GDI traces it', () => {

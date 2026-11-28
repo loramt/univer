@@ -111,7 +111,9 @@ export function parseEmf(bytes: Uint8Array): IMetafile | undefined {
 }
 
 interface IPen { color: string; width: number; style: number; cosmetic: boolean }
-interface IBrush { color: string | null }
+/** The pattern of a brush (EMR_CREATEDIBPATTERNBRUSHPT, EMR_CREATEMONOBRUSH): bits from the top row, 0 or 1. */
+interface IBrushPattern { width: number; height: number; bits: Uint8Array; colors: [string, string] | null }
+interface IBrush { color: string | null; pattern?: IBrushPattern }
 interface IFont { height: number; weight: number; italic: boolean; underline: boolean; strikeOut: boolean; escapement: number; face: string }
 type Rect = [number, number, number, number];
 type Matrix = [number, number, number, number, number, number];
@@ -438,6 +440,23 @@ export function drawEmf(ctx: UniverRenderingContext, emf: IMetafile, frame: IMet
             const vertical = state.textAlign & 24;
             const startX = horizontal === 6 ? x0 - total / 2 : horizontal === 2 ? x0 - total : x0;
             let x = startX;
+            const angle = ((font.escapement || 0) / 10) * Math.PI / 180;
+            if (angle !== 0) {
+                // a font with an escapement writes along a baseline turned by it, counter-clockwise, around the
+                // reference point (the text of Excel turned in a cell)
+                const [rx, ry] = point(x0, y0, m);
+                const scaleX = Math.hypot(m[0], m[1]);
+                const lift = vertical === 24 ? 0 : vertical === 8 ? -descent : ascent;
+                ctx.save();
+                ctx.translate(rx, ry);
+                ctx.rotate(-angle);
+                for (let i = 0; i < count; i++) {
+                    ctx.fillText(string[i], (x - x0) * scaleX, lift);
+                    x += advances.length === count ? advances[i] : ctx.measureText(string[i]).width / Math.max(1e-6, scaleX);
+                }
+                ctx.restore();
+                return;
+            }
             for (let i = 0; i < count; i++) {
                 const [px, py] = point(x, y0, m);
                 const baseline = vertical === 24 ? py : vertical === 8 ? py - descent : py + ascent;
@@ -463,6 +482,69 @@ export function drawEmf(ctx: UniverRenderingContext, emf: IMetafile, frame: IMet
         });
     };
 
+    /** The bits of a monochrome pattern brush, with its two colours (null: the text and background colours). */
+    const brushPattern = (offset: number, mono: boolean): IBrushPattern | undefined => {
+        const bmi = offset + u32(offset + 16);
+        const bits = offset + u32(offset + 24);
+        if (bmi + 40 > view.byteLength) return undefined;
+        const width = i32(bmi + 4);
+        const height = i32(bmi + 8);
+        const rows = Math.abs(height);
+        if (width <= 0 || rows === 0 || width > 64 || rows > 64 || view.getUint16(bmi + 14, true) !== 1 || u32(bmi + 16) !== 0) {
+            return undefined;
+        }
+        const stride = Math.ceil(width / 32) * 4;
+        if (bits + stride * rows > view.byteLength) return undefined;
+        const out = new Uint8Array(width * rows);
+        for (let row = 0; row < rows; row++) {
+            // rows go from the bottom unless the height is negative
+            const source = bits + (height > 0 ? rows - 1 - row : row) * stride;
+            for (let column = 0; column < width; column++) {
+                out[row * width + column] = (view.getUint8(source + (column >> 3)) >> (7 - (column & 7))) & 1;
+            }
+        }
+        const palette = bmi + u32(bmi);
+        const rgb = (at: number) => `rgb(${view.getUint8(at + 2)},${view.getUint8(at + 1)},${view.getUint8(at)})`;
+        const colors: [string, string] | null = !mono && u32(offset + 12) === 0 && palette + 8 <= view.byteLength
+            ? [rgb(palette), rgb(palette + 4)]
+            : null;
+        return { width, height: rows, bits: out, colors };
+    };
+
+    /**
+     * A rectangle filled with a pattern brush, pixel by pixel of the device as GDI copies the pattern from the
+     * origin of the device: the dotted borders of Excel. A large rectangle takes the grey of the brush.
+     */
+    const fillPattern = (pattern: IBrushPattern, x: number, y: number, cx: number, cy: number) => {
+        const device = deviceMatrix();
+        const [a, b] = point(x, y, device);
+        const [c, d] = point(x + cx, y + cy, device);
+        const left = Math.round(Math.min(a, c));
+        const right = Math.round(Math.max(a, c));
+        const top = Math.round(Math.min(b, d));
+        const bottom = Math.round(Math.max(b, d));
+        if ((right - left) * (bottom - top) > 40000) {
+            return false;
+        }
+        const colors = pattern.colors ?? [state.textColor, state.bkColor];
+        withClip(() => {
+            for (let row = top; row < bottom; row++) {
+                const line = ((row % pattern.height) + pattern.height) % pattern.height;
+                let start = left;
+                for (let column = left; column <= right; column++) {
+                    const at = (value: number) => pattern.bits[line * pattern.width + (((value % pattern.width) + pattern.width) % pattern.width)];
+                    if (column < right && at(column) === at(start)) continue;
+                    const [px, py] = point(start, row, toPage);
+                    const [qx, qy] = point(column, row + 1, toPage);
+                    ctx.fillStyle = colors[at(start)];
+                    ctx.fillRect(Math.min(px, qx), Math.min(py, qy), Math.abs(qx - px), Math.abs(qy - py));
+                    start = column;
+                }
+            }
+        });
+        return true;
+    };
+
     const blit = (offset: number, stretch: boolean) => {
         // EMR_BITBLT and EMR_STRETCHBLT: a pattern copy without a source fills the destination with the brush
         const x = i32(offset + 24);
@@ -476,6 +558,9 @@ export function drawEmf(ctx: UniverRenderingContext, emf: IMetafile, frame: IMet
             return;
         }
         void stretch;
+        if (rop === 0x00F00021 && state.brush.pattern && fillPattern(state.brush.pattern, x, y, cx, cy)) {
+            return;
+        }
         const fill = rop === 0x00F00021 ? state.brush.color : rop === 0x00000042 ? BLACK : rop === 0x00FF0062 ? 'rgb(255,255,255)' : null;
         if (fill === null) {
             return;
@@ -633,8 +718,9 @@ export function drawEmf(ctx: UniverRenderingContext, emf: IMetafile, frame: IMet
                 }
                 case 93:
                 case 94:
-                    // monochrome and DIB pattern brushes: the dots of Excel's dotted borders, drawn in grey
-                    objects.set(u32(offset + 8), { color: 'rgb(128,128,128)' });
+                    // monochrome and DIB pattern brushes: the dots of Excel's dotted borders; grey where the pattern
+                    // cannot be read
+                    objects.set(u32(offset + 8), { color: 'rgb(128,128,128)', pattern: brushPattern(offset, type === 93) });
                     break;
                 case 82: {
                     const at = offset + 12;
