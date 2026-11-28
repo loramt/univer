@@ -2056,7 +2056,11 @@ describe('doc skeleton', () => {
                         skeleton.calculate();
                     }
                     const pages = skeleton.getSkeletonData()!.pages;
-                    expect(pages).toHaveLength(2);
+                    // A whole table that fills its page leaves no room for the paragraph after it, which goes to the
+                    // next page, as in Word.
+                    const fillsPage = !splitTable && tableLineHeight === 20;
+                    expect(pages).toHaveLength(fillsPage ? 3 : 2);
+                    expect(skeleton.findBodyPageIndexByCharIndex(dataStream.length - 2)).toBe(fillsPage ? 2 : 1);
                     const kept = !splitTable && keepNext && tableLineHeight === 10;
                     expect(skeleton.findBodyPageIndexByCharIndex(prefix.indexOf('Heading'))).toBe(kept ? 1 : 0);
                     const positionedTable = [...pages[1].skeTables.values()][0];

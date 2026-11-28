@@ -2270,9 +2270,12 @@ function _lineOperator(
     const lineOverflowsSection = !clipsSameParagraphInlineDrawing &&
         _getLineOverflowHeight(lastPage, paragraphConfig, glyphGroup, isParagraphFirstShapedText, lineMetrics, lineHeight) + newLineTop - availableSectionHeight > lineOverflowTolerance;
 
+    // The part of its table above the line takes the page as lines would: a line that does not fit below it goes to
+    // the next page, as Word moves the paragraph after a table that ends at the foot of a page it opened.
+    const followsTablePart = tableFlowTop > lineTop + 0.01;
     if (
         (lineOverflowsSection &&
-            (column.lines.length > 0 || initialFootnoteTop > 0 || section.top > 0 || (lastPage.footnoteHeight ?? 0) > 0 || footnoteBodyLimit === -1) &&
+            (column.lines.length > 0 || followsTablePart || initialFootnoteTop > 0 || section.top > 0 || (lastPage.footnoteHeight ?? 0) > 0 || footnoteBodyLimit === -1) &&
             lastPage.sections.length > 0) ||
         needOpenNewPageByTableLayout
     ) {
