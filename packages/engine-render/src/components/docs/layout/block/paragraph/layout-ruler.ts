@@ -2094,14 +2094,29 @@ function _getLineOverflowHeight(
 }
 
 function _getLineOverflowTolerance(lastPage: IDocumentSkeletonPage, paragraphConfig: IParagraphConfig): number {
-    // Visible text must fit paginated body and cell bounds; blank trailing leading is excluded above. A hundredth of a
-    // pixel is rounding of the measures, far below the twip Word lays out in: a line that ends 0.0066 px past the room
-    // its notes leave (the Mosaico of Golden Group, page 300) fits there, as in Word.
-    return (lastPage.type === DocumentSkeletonPageType.CELL ||
-        lastPage.type === DocumentSkeletonPageType.BODY) &&
-        isTraditionalDocumentCompatibility(paragraphConfig.documentCompatibilityPolicy)
-        ? 0.01
+    // Visible text must fit paginated body and cell bounds; blank trailing leading is excluded above.
+    return _measuresInTwips(lastPage, paragraphConfig)
+        ? 1e-6
         : LINE_LAYOUT_OVERFLOW_TOLERANCE;
+}
+
+/** Whether the page lays out its lines in whole twips, as Word does: the body and the cells of Word documents. */
+function _measuresInTwips(lastPage: IDocumentSkeletonPage, paragraphConfig: IParagraphConfig): boolean {
+    return (lastPage.type === DocumentSkeletonPageType.CELL || lastPage.type === DocumentSkeletonPageType.BODY) &&
+        isTraditionalDocumentCompatibility(paragraphConfig.documentCompatibilityPolicy);
+}
+
+/**
+ * Whether a line that ends at bottom passes the room that ends at limit, both from the top of the section, as Word
+ * measures them: the room in whole twips, the line without the part of a twip it ends with. Word keeps on its page a
+ * line that ends less than a twip past its room (probe soglia-twip of the bench, Word 365: lines exactly at the end
+ * of the body and half a twip past it stay, at one twip and more they go to the next page, with five widths of
+ * border; the Mosaico of Golden Group, page 300: an empty paragraph 0.1 twip past the room its notes leave stays).
+ * The room is rounded to the twip because the conversion gives pixels to the hundredth, a fifth of a twip.
+ */
+function _overflowsInTwips(bottom: number, limit: number): boolean {
+    // 1 px is 15 twips
+    return Math.floor(bottom * 15 + 1e-6) > Math.round(limit * 15);
 }
 
 function _lineOperator(
@@ -2269,8 +2284,10 @@ function _lineOperator(
     }
     const availableSectionHeight = footnoteBodyLimit == null ? section.height : Math.min(section.height, footnoteBodyLimit - section.top);
     const lineOverflowTolerance = _getLineOverflowTolerance(lastPage, paragraphConfig);
-    const lineOverflowsSection = !clipsSameParagraphInlineDrawing &&
-        _getLineOverflowHeight(lastPage, paragraphConfig, glyphGroup, isParagraphFirstShapedText, lineMetrics, lineHeight) + newLineTop - availableSectionHeight > lineOverflowTolerance;
+    const lineBottom = _getLineOverflowHeight(lastPage, paragraphConfig, glyphGroup, isParagraphFirstShapedText, lineMetrics, lineHeight) + newLineTop;
+    const lineOverflowsSection = !clipsSameParagraphInlineDrawing && (_measuresInTwips(lastPage, paragraphConfig)
+        ? _overflowsInTwips(lineBottom, availableSectionHeight)
+        : lineBottom - availableSectionHeight > lineOverflowTolerance);
 
     // The part of its table above the line takes the page as lines would: a line that does not fit below it goes to
     // the next page, as Word moves the paragraph after a table that ends at the foot of a page it opened.

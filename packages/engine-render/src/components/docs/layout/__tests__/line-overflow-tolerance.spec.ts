@@ -55,13 +55,14 @@ function pagesFor(lineHeight: number): number {
     }
 }
 
-describe('lines at the foot of a page of a Word document', () => {
+describe('lines at the foot of a page of a Word document, in whole twips', () => {
     afterEach(() => vi.restoreAllMocks());
 
-    // A hundredth of a pixel is rounding of the measures: the third line, 0.005 past the body, stays (the Mosaico of
-    // Golden Group, page 300, where the empty paragraph that Word keeps ended 0.0066 px past the room of its row); 0.03
-    // past it, it goes to the next page.
-    it.each([[20, 1], [20.0017, 1], [20.01, 2]])('with lines %s high the three lines take %i page(s)', (lineHeight, pages) => {
+    // Word lays out in whole twips (15 to the pixel): a line that ends less than a twip past the body stays on its
+    // page, at a twip and more it goes to the next one (probe soglia-twip of the bench: half a twip stays, one and one
+    // and a half go). The body is 900 twips; the three lines end 0.5 and 1.5 twips past it, or exactly at its end. The
+    // Mosaico of Golden Group, page 300: an empty paragraph 0.1 twip past the room of its row stays, as in Word.
+    it.each([[20, 1], [20 + 0.5 / 45, 1], [20 + 1.5 / 45, 2]])('with lines %s high the three lines take %i page(s)', (lineHeight, pages) => {
         expect(pagesFor(lineHeight)).toBe(pages);
     });
 });
