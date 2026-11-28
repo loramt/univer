@@ -71,14 +71,12 @@ function pagesFor(lineHeight: number): number {
     }
 }
 
-describe('lines at the foot of a page of a Word document, in whole twips', () => {
+describe('lines at the foot of a page of a Word document', () => {
     afterEach(() => vi.restoreAllMocks());
 
-    // Word lays out in whole twips (15 to the pixel): a line that ends less than a twip past the body stays on its
-    // page, at a twip and more it goes to the next one (probe soglia-twip of the bench: half a twip stays, one and one
-    // and a half go). The body is 900 twips; the three lines end 0.5 and 1.5 twips past it, or exactly at its end. The
-    // Mosaico of Golden Group, page 300: an empty paragraph 0.1 twip past the room of its row stays, as in Word.
-    it.each([[20, 1], [20 + 0.5 / 45, 1], [20 + 1.5 / 45, 2]])('with lines %s high the three lines take %i page(s)', (lineHeight, pages) => {
+    // Word compares where a line ends with its room exactly: the three lines end at the end of the body, 60 high, and
+    // stay; a tenth of a twip past it (15 twips to the pixel), the third goes to the next page.
+    it.each([[20, 1], [20 - 0.1 / 45, 1], [20 + 0.1 / 45, 2]])('with lines %s high the three lines take %i page(s)', (lineHeight, pages) => {
         expect(pagesFor(lineHeight)).toBe(pages);
     });
 });
@@ -147,15 +145,15 @@ function cellParagraph(lineHeight: number): { lines: number; pages: number } {
     }
 }
 
-describe('the last line of a paragraph in a part of a table row, in whole twips', () => {
+describe('the last line of a paragraph in a part of a table row', () => {
     afterEach(() => vi.restoreAllMocks());
 
-    // Four lines of 15.005 end 0.3 twip past the body of 60: the last one stays in the row's part, as a line less than a
-    // twip past its room does, and the line after the table goes to the second page. Lines of 15.02 end 1.2 twips past
-    // it: the last one goes to the second page, and widow control takes the third along. The checks of the room of the
-    // line agree: in the Mosaico of Golden Group, where one let such a line stay and another did not, the line was laid
-    // out again until the stack ran out.
-    it.each([[15.005, 4], [15.02, 2]])('with lines %s high the row keeps %i lines on the first page', (lineHeight, kept) => {
+    // Four lines of 15 end at the end of the body, 60 high: the row keeps them, and the line after the table goes to the
+    // second page. Lines of 15.005 end 0.3 twip past it: the last one goes to the second page, as in Word (the Mosaico of
+    // Golden Group: the line of a cell 0.24 twip past its room), and widow control takes the third along. The checks of
+    // the room of the line agree: where one let such a line stay and another did not, the line was laid out again
+    // until the stack ran out.
+    it.each([[15, 4], [15.005, 2]])('with lines %s high the row keeps %i lines on the first page', (lineHeight, kept) => {
         const { lines, pages } = cellParagraph(lineHeight);
         expect(lines).toBe(kept);
         expect(pages).toBe(2);
@@ -166,7 +164,7 @@ describe('the last line of a paragraph in a part of a table row, in whole twips'
     // until the bound, then stays as it is, and the layout ends, with a warning each time the row is laid out.
     it('ends with a warning when two checks of the room of a line disagree', () => {
         vi.spyOn(lineRoom, 'cellParagraphEndOverflows').mockReturnValue(true);
-        const { lines, pages } = cellParagraph(15.005);
+        const { lines, pages } = cellParagraph(15);
         const warnings = takeLayoutWarnings();
         expect([lines, pages]).toEqual([4, 2]);
         expect(warnings.length).toBeGreaterThan(0);
