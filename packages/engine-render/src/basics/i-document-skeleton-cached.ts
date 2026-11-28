@@ -330,6 +330,8 @@ export interface IDocumentSkeletonGlyph {
     streamType: DataStreamTreeTokenType;
     /** The bullet of a check list, drawn as a checkbox. */
     checkbox?: boolean;
+    /** A page or column break of a Word document: the line it ends is not justified, as the last of a paragraph. */
+    endsLine?: boolean;
     width: number; // cum width
     bBox: IDocumentSkeletonBoundingBox; // bBox: size of glyph
     xOffset: number; // xOffset, adjust text align in glyph

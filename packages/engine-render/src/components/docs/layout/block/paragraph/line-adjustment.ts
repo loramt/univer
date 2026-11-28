@@ -279,7 +279,9 @@ function horizontalAlignHandler(
         if ((divide.isFull || ((justifiedWords || compressedAlignedText) && glyphGroupWidth > width)) && alignmentDivide.glyphGroup.length > 0) {
             let remaining = width - glyphGroupWidth;
             const shrink = getGlyphGroupShrinkability(alignmentDivide.glyphGroup);
-            const terminalDivide = i === divides.length - 1 && isParagraphEnd(line);
+            // the last divide of the last line of a paragraph, or of a line a page or column break ends (Word)
+            const terminalDivide = i === divides.length - 1 &&
+                (isParagraphEnd(line) || alignmentDivide.glyphGroup[alignmentDivide.glyphGroup.length - 1]?.endsLine === true);
             let hangsJustifiedPunctuation = false;
 
             // Handle hanging punctuation to the right.

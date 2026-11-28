@@ -313,10 +313,17 @@ function createWhitespaceGlyph(
         }
         newGlyph = createSkeletonLetterGlyph(char, balanceSpaceWidth ? { ...config, balanceSpaceWidth } : config);
     }
-    if (traditionalLayout && char === DataStreamTreeTokenType.COLUMN_BREAK &&
-        viewModel.getCustomRange(paragraphNode.contentStartIndex + i)?.properties?.breakType !== DocxBreakType.COLUMN) {
-        // DOCX soft breaks are widthless, but an authored blank line still has font height.
-        newGlyph.bBox = { ...createSkeletonLetterGlyph(' ', config, 0).bBox, width: 0 };
+    if (traditionalLayout && char === DataStreamTreeTokenType.COLUMN_BREAK) {
+        if (viewModel.getCustomRange(paragraphNode.contentStartIndex + i)?.properties?.breakType !== DocxBreakType.COLUMN) {
+            // DOCX soft breaks are widthless, but an authored blank line still has font height.
+            newGlyph.bBox = { ...createSkeletonLetterGlyph(' ', config, 0).bBox, width: 0 };
+        } else {
+            // a column break ends its line as a paragraph does: Word does not justify the line before it
+            newGlyph.endsLine = true;
+        }
+    }
+    if (traditionalLayout && char === DataStreamTreeTokenType.PAGE_BREAK) {
+        newGlyph.endsLine = true;
     }
 
     if (char === DataStreamTreeTokenType.PARAGRAPH &&

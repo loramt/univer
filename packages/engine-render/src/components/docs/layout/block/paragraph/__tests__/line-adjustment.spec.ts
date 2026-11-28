@@ -17,6 +17,7 @@
 import {
     BooleanNumber,
     characterSpacingControlType,
+    CustomRangeType,
     DataStreamTreeTokenType,
     DocStyleType,
     DocumentFlavor,
@@ -847,6 +848,57 @@ describe('line-adjustment', () => {
         const pages = lineBreaking(ctx, viewModel, shapedTextList, curPage, paragraphNode, sectionBreakConfig, null);
 
         expect(() => lineAdjustment(pages, viewModel, paragraphNode, sectionBreakConfig)).not.toThrow();
+    });
+
+    it.each([
+        { name: 'page break', breakChar: '\f', customRanges: [] },
+        { name: 'column break', breakChar: '\v', customRanges: [{ rangeId: 'c', rangeType: CustomRangeType.CUSTOM, startIndex: 5, endIndex: 5, wholeEntity: true, properties: { breakType: 'column' } }] },
+    ])('does not justify the line a $name ends, as Word', ({ breakChar, customRanges }) => {
+        // Word 365 (sonda interruzioni2): the justified line before a page or column break keeps its spaces, as
+        // the last line of a paragraph; the line before a text-wrapping break is justified.
+        const content = `aa bb${breakChar}cc`;
+        const measure = vi.spyOn(FontCache, 'getTextSize').mockImplementation((text) => ({
+            width: text === '\r' || text === '\f' || text === '\v' ? 0 : text.length * 8,
+            ba: 10,
+            bd: 4,
+            aba: 10,
+            abd: 4,
+            sp: 0,
+            sbr: 0,
+            sbo: 0,
+            spr: 0,
+            spo: 0,
+        }));
+        const bed = createParagraphLayoutTestBed(content, {
+            documentStyle: {
+                documentFlavor: DocumentFlavor.TRADITIONAL,
+                compatibilitySettings: { compatibilityMode: 15 },
+                pageSize: { width: 200, height: 600 },
+                marginLeft: 0,
+                marginRight: 0,
+            },
+            body: {
+                paragraphs: [{ startIndex: content.length, paragraphStyle: { horizontalAlign: HorizontalAlign.JUSTIFIED } }],
+                customRanges,
+            },
+        });
+        try {
+            const shaped = shaping(bed.ctx, `${content}\r`, bed.viewModel, bed.paragraphNode, bed.sectionBreakConfig);
+            const pages = lineBreaking(bed.ctx, bed.viewModel, shaped, bed.curPage, bed.paragraphNode, bed.sectionBreakConfig, null);
+            lineAdjustment(pages, bed.viewModel, bed.paragraphNode, bed.sectionBreakConfig);
+            const lines = pages.flatMap((page) => page.sections.flatMap((section) => section.columns.flatMap((column) => column.lines)));
+            const first = lines[0].divides[0].glyphGroup;
+            // the break is the last glyph of the line, without content
+            expect(first.map((glyph) => glyph.content).join('')).toBe('aa bb');
+            expect(first.at(-1)?.endsLine).toBe(true);
+            // the space keeps its width: bb starts right after it
+            const b = first.findIndex((glyph) => glyph.content === 'b');
+            expect(first[b].left).toBeCloseTo(24);
+        } finally {
+            measure.mockRestore();
+            bed.viewModel.dispose();
+            bed.dataModel.dispose();
+        }
     });
 
     it('handles horizontal align JUSTIFIED', () => {
