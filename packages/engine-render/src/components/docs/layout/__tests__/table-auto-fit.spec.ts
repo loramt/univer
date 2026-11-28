@@ -120,8 +120,11 @@ describe('autofit tables of Word', () => {
             .toEqual([100, 200, 300]);
     });
 
-    /** An autofit table of these texts nested in the second cell of a fixed table, after what the cell has before it. */
-    function nestedTableOf(texts: string[], before = '') {
+    /**
+     * An autofit table of these texts nested in the second cell of a fixed table, after what the cell has before it, in
+     * a row of automatic height or of the exact height given.
+     */
+    function nestedTableOf(texts: string[], before = '', exactHeight?: number) {
         const previousContext = Reflect.get(FontCache, '_context');
         Reflect.set(FontCache, '_context', null);
         FontCache.invalidateMetrics(() => true);
@@ -149,7 +152,10 @@ describe('autofit tables of Word', () => {
             layout: TableLayoutType.FIXED,
             cellMargin: zero,
             tableColumns: grid.map((width) => ({ size: { type: TableSizeType.SPECIFIED, width: { v: width } } })),
-            tableRows: [{ trHeight: { hRule: TableRowHeightRule.AUTO, val: { v: 0 } }, tableCells: grid.map(() => ({ margin: zero })) }],
+            tableRows: [{
+                trHeight: tableId === 'outer' && exactHeight != null ? { hRule: TableRowHeightRule.EXACT, val: { v: exactHeight } } : { hRule: TableRowHeightRule.AUTO, val: { v: 0 } },
+                tableCells: grid.map(() => ({ margin: zero })),
+            }],
             ...(autoFit ? { wordAutoFit: autoFit } : {}),
         } as ITable);
         const nestedAutoFit = { width: { type: 'auto' as const, value: 0 }, columns: texts.map(() => auto) };
@@ -188,6 +194,8 @@ describe('autofit tables of Word', () => {
         expect(nestedTableOf(['aa', long]).opensCell).toBe(true);
         expect(nestedTableOf(['aa', long], DataStreamTreeTokenType.PARAGRAPH).opensCell).toBeUndefined();
         expect(nestedTableOf(['aa', long], `prima${DataStreamTreeTokenType.PARAGRAPH}`).opensCell).toBeUndefined();
+        // A row of exact height clips all of its content, the table that opens a cell too (probe v8-larghe-esatta).
+        expect(nestedTableOf(['aa', long], '', 40).opensCell).toBeUndefined();
     });
 
     it('keeps the grid of an autofit table nested in a fixed table', () => {

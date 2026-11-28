@@ -15,7 +15,7 @@
  */
 
 import type { IDocumentBody, ITable, ITableRow, Nullable } from '@univerjs/core';
-import { BooleanNumber, CustomRangeType, DataStreamTreeNodeType, DocumentDataModel, DocumentFlavor, GridType, ObjectRelativeFromV, PageOrientType, PositionedObjectLayoutType, TableAlignmentType, TableTextWrapType } from '@univerjs/core';
+import { BooleanNumber, CustomRangeType, DataStreamTreeNodeType, DocumentDataModel, DocumentFlavor, GridType, ObjectRelativeFromV, PageOrientType, PositionedObjectLayoutType, TableAlignmentType, TableRowHeightRule, TableTextWrapType } from '@univerjs/core';
 import type {
     IDocumentSkeletonHeaderFooter,
     IDocumentSkeletonPage,
@@ -921,7 +921,7 @@ export function createSkeletonCellPages(
         cellNode.startIndex,
         sectionBreakConfig.documentCompatibilityPolicy ?? getDocumentCompatibilityPolicy()
     );
-    markCellOpeningTable(viewModel, sectionNode, pages);
+    markCellOpeningTable(viewModel, sectionNode, pages, tableConfig.tableRows[row]);
 
     applyTrailingBlockRangeSpaceBelow(pages, body, cellNode.endIndex);
     applyTrailingCellParagraphSpaceBelow(pages, body, cellNode.endIndex, cellSectionBreakConfig);
@@ -939,9 +939,18 @@ export function createSkeletonCellPages(
  * Marks the table that is the first block of a cell (its paragraph holds it before any text, and no paragraph comes
  * before that one), on every page of the cell: Word draws it whole, past the cell's edges when it is wider (the
  * verifier's probes v7-annidate-larghe: 19 cases out of 19), and clips at the cell's edges a table with a paragraph
- * before it, even an empty one (18 out of 18).
+ * before it, even an empty one (18 out of 18). A row of exact height clips all of its cells' content, the table that
+ * opens a cell too, across and down (probe v8-larghe-esatta), so its tables are not marked.
  */
-function markCellOpeningTable(viewModel: DocumentViewModel, sectionNode: DataStreamTreeNode | undefined, pages: IDocumentSkeletonPage[]): void {
+function markCellOpeningTable(
+    viewModel: DocumentViewModel,
+    sectionNode: DataStreamTreeNode | undefined,
+    pages: IDocumentSkeletonPage[],
+    row: ITableRow | undefined
+): void {
+    if (row?.trHeight?.hRule === TableRowHeightRule.EXACT) {
+        return;
+    }
     const tableNode = sectionNode?.children?.[0]?.children?.[0];
     if (tableNode?.nodeType !== DataStreamTreeNodeType.TABLE) {
         return;
@@ -966,6 +975,8 @@ export interface ICellSkeletonBuildState {
     sectionBreakConfig: ISectionBreakConfig;
     cellSectionBreakConfig: ISectionBreakConfig;
     tableConfig: ITable;
+    /** The row of the cell, whose height rule decides whether the cell clips the table that opens it. */
+    row?: number;
     verticalCellWidth?: number;
     paragraphIndex: number;
     layoutAnchor: Nullable<number>;
@@ -1022,6 +1033,7 @@ export function startSkeletonCellPagesBuild(
         sectionBreakConfig,
         cellSectionBreakConfig,
         tableConfig,
+        row,
         paragraphIndex: 0,
         verticalCellWidth,
         layoutAnchor,
@@ -1073,7 +1085,7 @@ export function stepSkeletonCellPagesBuild(state: ICellSkeletonBuildState): bool
             state.cellNode.startIndex,
             state.sectionBreakConfig.documentCompatibilityPolicy ?? getDocumentCompatibilityPolicy()
         );
-        markCellOpeningTable(state.viewModel, state.sectionNode, state.pages);
+        markCellOpeningTable(state.viewModel, state.sectionNode, state.pages, state.row == null ? undefined : state.tableConfig.tableRows[state.row]);
         applyTrailingBlockRangeSpaceBelow(
             state.pages,
             state.ctx.dataModel?.getBody?.(),
