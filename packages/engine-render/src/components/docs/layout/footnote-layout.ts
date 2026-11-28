@@ -279,6 +279,22 @@ function collectCellReferenceLines(page: IDocumentSkeletonPage, offset = 0): { t
     return lines;
 }
 
+/**
+ * How high a part of the row must be to hold the first line of one of its cells, with the cell's margins (0 when a
+ * cell starts with something else than a line), as the table layout measures it when a row moves whole.
+ */
+function rowFirstLineHeight(row: IDocumentSkeletonTable['rows'][number]): number {
+    let height = Number.POSITIVE_INFINITY;
+    for (const cell of row.cells) {
+        const line = cell.sections[0]?.columns[0]?.lines[0];
+        if (!line || cell.skeTables.size > 0) {
+            return 0;
+        }
+        height = Math.min(height, (cell.marginTop ?? 0) + line.top + line.lineHeight + (cell.marginBottom ?? 0));
+    }
+    return Number.isFinite(height) ? height : 0;
+}
+
 /** How many lines of a cell page end within the given height, those of the tables inside it included. */
 function countCellLinesWithin(page: IDocumentSkeletonPage, height: number, offset = 0): number {
     let count = 0;
@@ -550,6 +566,13 @@ export class DocumentFootnoteLayout {
                     // line whose note starts below it and continues on the next page: Word ends the page with that
                     // line (the verifier's probes v8r-lunga-40 and -44, a note of 20 lines).
                     const partHeight = Math.min(capacity, row.height);
+                    // A part below other content of the page that cannot hold the first line of its cells holds
+                    // nothing: the row goes to the next page whole, as Word moves it (the verifier's probes v8r-prima-40,
+                    // -terza-40, -ultima-40: the row after a note's page went there with one line, and the rest to a
+                    // page more).
+                    if (onCurrentPage && offset > 0.01 && row.height > capacity + 0.01 && capacity + 0.01 < rowFirstLineHeight(row)) {
+                        return 'next-page';
+                    }
                     if (onCurrentPage && offset > 0.01 && (rows.length > 1 || row.height > capacity + 0.01)) {
                         const opensEmpty = lines.some((line) => line.atTop && line.bottom > partHeight + 0.01);
                         const kept = lines.filter((line) => line.bottom <= partHeight + 0.01);

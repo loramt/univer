@@ -393,6 +393,62 @@ describe('footnote body layout', () => {
         }
     });
 
+    it('moves whole to the next page a row that cannot start below a page of notes', () => {
+        // The verifier's probes v8r-prima-40, -terza-40 and -ultima-40: the note of the third row of a table of eight
+        // fills what is left of the page, and the next row cannot start there. It was split for that room, and its
+        // first line went alone to the next page, the rest to a page more; Word moves the row whole to the next page.
+        const T = DataStreamTreeTokenType;
+        const cell = (text: string) => `${T.TABLE_CELL_START}${text}${T.SECTION_BREAK}${T.TABLE_CELL_END}`;
+        const rows = Array.from({ length: 8 }, (_, row) => `${T.TABLE_ROW_START}${cell(`T${row}${T.PARAGRAPH}`)}${cell(Array.from({ length: 6 }, (_, line) =>
+            `R${row}L${line}${row === 2 && line === 0 ? '￼' : ''}${T.PARAGRAPH}`).join(''))}${T.TABLE_ROW_END}`).join('');
+        const tableStream = `${T.TABLE_START}${rows}${T.TABLE_END}`;
+        const noteStream = `${Array.from({ length: 3 }, (_, index) => `Note line ${index + 1}\r`).join('')}\n`;
+        for (let before = 20; before <= 50; before++) {
+            const prefix = Array.from({ length: before }, (_, index) => `Line ${index}\r`).join('');
+            const dataStream = `${prefix}${tableStream}\r\n`;
+            const reference = dataStream.indexOf('￼');
+            const bed = createParagraphLayoutTestBed('', {
+                documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL, pageSize: { width: 400, height: 700 } },
+                body: {
+                    dataStream,
+                    paragraphs: [...dataStream.matchAll(/\r/g)].map((match, index) => ({ startIndex: match.index!, paragraphId: `p-${index}` })),
+                    sectionBreaks: [...dataStream.matchAll(/\n/g)].map((match, index) => ({ startIndex: match.index!, sectionId: `s-${index}` })),
+                    tables: [{ tableId: 'table', startIndex: prefix.length, endIndex: prefix.length + tableStream.length }],
+                    customRanges: [{ rangeId: 'reference', rangeType: CustomRangeType.FOOTNOTE, startIndex: reference, endIndex: reference, wholeEntity: true, properties: { noteId: 'note' } }],
+                },
+                tableSource: {
+                    table: {
+                        tableId: 'table',
+                        align: 0,
+                        indent: { v: 0 },
+                        textWrap: 0,
+                        size: { type: 0, width: { v: 360 } },
+                        tableRows: Array.from({ length: 8 }, () => ({ cantSplit: 0, tableCells: [{ size: { type: 0, width: { v: 60 } } }, { size: { type: 0, width: { v: 300 } } }], trHeight: { val: { v: 0 }, hRule: 0 } })),
+                        tableColumns: [{ size: { type: 0, width: { v: 60 } } }, { size: { type: 0, width: { v: 300 } } }],
+                    },
+                },
+                notes: { note: { type: 'footnote' as const, noteId: 'note', body: {
+                    dataStream: noteStream,
+                    paragraphs: [...noteStream.matchAll(/\r/g)].map((match, index) => ({ paragraphId: `note-${index}`, startIndex: match.index! })),
+                    sectionBreaks: [{ sectionId: 'note-section', startIndex: noteStream.length - 1 }],
+                } } },
+            });
+            const skeleton = DocumentSkeleton.create(bed.viewModel, bed.ctx.docsConfig.localeService);
+            try {
+                skeleton.calculate();
+                const pages = skeleton.getSkeletonData()!.pages;
+                // no page but the last holds a single line of the table: a row that cannot start goes on whole
+                const tableLines = pages.map((page) => [...page.skeTables.values()].flatMap((table) => table.rows.flatMap((item) => item.cells.slice(1).flatMap((part) =>
+                    part.sections.flatMap((section) => section.columns.flatMap((column) => column.lines))))).length);
+                tableLines.slice(0, -1).forEach((count) => expect(count === 0 || count > 1).toBe(true));
+                expect(tableLines.reduce((sum, count) => sum + count, 0)).toBe(48);
+            } finally {
+                bed.viewModel.dispose();
+                bed.dataModel.dispose();
+            }
+        }
+    });
+
     it('reserves inherited paragraph after-spacing at the end of a note', () => {
         const bed = createParagraphLayoutTestBed('Reference\uFFFC', {
             documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL, defaultParagraphStyle: { spaceBelow: { v: 13 } } },
