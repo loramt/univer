@@ -1448,6 +1448,10 @@ export class Documents extends DocComponent {
         unitId: string,
         tableId: string
     ): IDocsTableRenderViewport | null {
+        // Word draws a table that opens its cell whole, past the cell's edges: it has no viewport that clips it.
+        if (tableSkeleton.opensCell === true && this._getDocumentFlavor() === DocumentFlavor.TRADITIONAL) {
+            return null;
+        }
         const viewport = getDocsTableRenderViewport(unitId, tableId);
         if (viewport) {
             return viewport;

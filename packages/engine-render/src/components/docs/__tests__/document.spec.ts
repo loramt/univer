@@ -1623,6 +1623,23 @@ describe('documents render', () => {
         documents.dispose();
     });
 
+    it('gives a table that opens its cell no viewport, so that it is drawn past the cell as in Word', () => {
+        // The verifier's probes v7-annidate-larghe: a table nested as the first block of its cell, wider than the
+        // cell, is drawn whole by Word; one with a paragraph before it is clipped at the cell's edges by the cell.
+        const documents = new Documents('docs-opening-table', {
+            getSkeletonData: () => ({ pages: [] }),
+            getViewModel: () => ({ getSnapshot: () => ({ documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL } }) }),
+        } as any);
+        const cell = createPage(DocumentSkeletonPageType.CELL, 'opening-cell');
+        cell.pageWidth = 100;
+        cell.marginLeft = 0;
+        cell.marginRight = 0;
+        const table = { left: 0, width: 150, tableSource: { tableColumns: [{ size: { width: { v: 150 } } }] } } as any;
+        expect((documents as any)._getTableViewport(cell, table, 'docs-opening-table', 'inner')).toMatchObject({ viewportWidth: 100 });
+        expect((documents as any)._getTableViewport(cell, { ...table, opensCell: true }, 'docs-opening-table', 'inner')).toBeNull();
+        documents.dispose();
+    });
+
     it('closes the exposed top of a wider row without redrawing its shared edge', () => {
         const documents = new Documents('docs-omitted-grid', {
             getSkeletonData: () => ({ pages: [] }),
