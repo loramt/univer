@@ -155,6 +155,78 @@ describe('footnote body layout', () => {
         }
     });
 
+    it.each([
+        { noteParagraphs: 60, lastLine: 'Cell 5￼\r', continued: [false, true] },
+        { noteParagraphs: 30, lastLine: 'Cell 6\r', continued: [false] },
+    ].flatMap((sample) => [false, true].map((incremental) => ({ ...sample, incremental }))))('ends a row that would fit where its note stops fitting (notes: $noteParagraphs, incremental: $incremental)', ({ noteParagraphs, lastLine, continued, incremental }) => {
+        // Word's probe note-continuate: a row that fits on its page holds a reference whose note does not fit below
+        // the row. A line goes on the page only while the notes of the lines before it fit: the row ends with the
+        // reference line when its note continues on the next page (60 paragraphs), and with the last line that
+        // leaves room for the whole note otherwise (30 paragraphs), as Word does with plain paragraphs.
+        const T = DataStreamTreeTokenType;
+        const cellText = `${Array.from({ length: 16 }, (_, paragraph) => `Cell ${paragraph + 1}${paragraph === 4 ? '￼' : ''}${T.PARAGRAPH}`).join('')}${T.SECTION_BREAK}`;
+        const tableStream = `${T.TABLE_START}${T.TABLE_ROW_START}${T.TABLE_CELL_START}${cellText}${T.TABLE_CELL_END}${T.TABLE_ROW_END}${T.TABLE_END}`;
+        const dataStream = `${tableStream}\r\n`;
+        const noteStream = `${Array.from({ length: noteParagraphs }, (_, i) => `Explanation ${i + 1} with enough text to wrap onto another line.\r`).join('')}\n`;
+        const reference = dataStream.indexOf('￼');
+        const bed = createParagraphLayoutTestBed('', {
+            documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL, pageSize: { width: 400, height: 400 } },
+            body: {
+                dataStream,
+                paragraphs: [...dataStream.matchAll(/\r/g)].map((match, index) => ({ startIndex: match.index!, paragraphId: `p-${index}` })),
+                sectionBreaks: [{ sectionId: 'main', startIndex: dataStream.length - 1 }],
+                tables: [{ tableId: 'table', startIndex: 0, endIndex: tableStream.length }],
+                customRanges: [{ rangeId: 'reference', rangeType: CustomRangeType.FOOTNOTE, startIndex: reference, endIndex: reference, wholeEntity: true, properties: { noteId: 'note' } }],
+            },
+            tableSource: {
+                table: {
+                    tableId: 'table',
+                    align: 0,
+                    indent: { v: 0 },
+                    textWrap: 0,
+                    size: { type: 0, width: { v: 300 } },
+                    tableRows: [{ cantSplit: 0, tableCells: [{ size: { type: 0, width: { v: 300 } } }], trHeight: { val: { v: 0 }, hRule: 0 } }],
+                    tableColumns: [{ size: { type: 0, width: { v: 300 } } }],
+                },
+            },
+            notes: {
+                note: { type: 'footnote' as const, noteId: 'note', body: {
+                    dataStream: noteStream,
+                    paragraphs: [...noteStream.matchAll(/\r/g)].map((match, index) => ({ paragraphId: `note-${index}`, startIndex: match.index! })),
+                    sectionBreaks: [{ sectionId: 'note-section', startIndex: noteStream.length - 1 }],
+                } },
+            },
+        });
+        const skeleton = DocumentSkeleton.create(bed.viewModel, bed.ctx.docsConfig.localeService);
+        try {
+            if (incremental) {
+                const generation = skeleton.startIncrementalLayout();
+                let progress = skeleton.stepIncrementalLayout(generation, 0);
+                for (let step = 0; step < 20_000 && !progress.complete; step++) {
+                    progress = skeleton.stepIncrementalLayout(generation, 0);
+                }
+                expect(progress).toMatchObject({ complete: true, cancelled: false });
+            } else {
+                skeleton.calculate();
+            }
+            const pages = skeleton.getSkeletonData()!.pages;
+            const cellText = (page: IDocumentSkeletonPage) => [...page.skeTables.values()]
+                .flatMap((table) => table.rows.flatMap((row) => row.cells.flatMap(getPageGlyphs)))
+                .filter((glyph) => glyph.count > 0)
+                .map((glyph) => glyph.raw)
+                .join('');
+            expect(pages.length).toBeGreaterThan(1);
+            expect(cellText(pages[0]).endsWith(lastLine)).toBe(true);
+            expect(cellText(pages[1]).startsWith('Cell')).toBe(true);
+            const fragments = pages.flatMap((page) => page.notes ?? []);
+            expect(fragments.map((fragment) => fragment.continued)).toEqual(continued);
+            expect(fragments.flatMap((fragment) => getPageGlyphs(fragment.page)).filter((glyph) => glyph.count > 0).map((glyph) => glyph.raw).join('')).toBe(noteStream);
+        } finally {
+            bed.viewModel.dispose();
+            bed.dataModel.dispose();
+        }
+    });
+
     it('reserves inherited paragraph after-spacing at the end of a note', () => {
         const bed = createParagraphLayoutTestBed('Reference\uFFFC', {
             documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL, defaultParagraphStyle: { spaceBelow: { v: 13 } } },
