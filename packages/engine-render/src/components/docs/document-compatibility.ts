@@ -220,7 +220,7 @@ export function getDocumentFontStyle(
         const family = (textStyle.ff || DEFAULT_STYLES.ff).split(',')[0].trim().replace(/^['"]|['"]$/g, '');
         if (/^(?:SimSun|宋体|DengXian|等线|PMingLiU)$/i.test(family)) {
             wordScriptSizeRatio = 0.5;
-        } else if (/^(?:Arial|Arial Narrow|Times|Times New Roman|Calibri|Cambria|Segoe UI|Consolas|Microsoft YaHei|微软雅黑|Franklin Gothic Book|Georgia|Lucida Sans Unicode|Open Sans|Symbol|Tahoma)$/i.test(family)) {
+        } else if (/^(?:Arial|Arial Narrow|Times|Times New Roman|Calibri|Cambria|Segoe UI|Consolas|Microsoft YaHei|微软雅黑|Franklin Gothic Book|Georgia|Lucida Sans Unicode|Open Sans|Symbol|Tahoma|Verdana)$/i.test(family)) {
             wordScriptSizeRatio = 1331 / 2048;
         } else if (/^Aptos$/i.test(family)) {
             wordScriptSizeRatio = 1229 / 2048;
@@ -234,9 +234,12 @@ export function getDocumentFontStyle(
             // Word uses its legacy script scale for these faces despite their OS/2 size.
             wordScriptSizeRatio = 0.6;
         }
-        // shortcut: unverified faces retain existing metrics until their Word script metrics are available.
+        // shortcut: unverified faces retain existing metrics until their Word script metrics are available, but
+        // their size is rounded to half-points as Word rounds it for every font.
     }
-    return getFontStyleString(textStyle, fontFamilyFallbacks, fontFamilyClasses, wordScriptSizeRatio);
+    const scripted = (policy?.mode === 'traditional' || policy?.mode === 'modern') &&
+        (textStyle?.va === BaselineOffset.SUPERSCRIPT || textStyle?.va === BaselineOffset.SUBSCRIPT);
+    return getFontStyleString(textStyle, fontFamilyFallbacks, fontFamilyClasses, wordScriptSizeRatio, scripted);
 }
 
 export function getSmallCapsFontStyle(

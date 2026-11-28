@@ -263,9 +263,29 @@ describe('Word document script font sizes', () => {
         expect(getFontStyleString(style).fontSize).toBe(6);
     });
 
-    it('retains the existing fallback for an unverified font face', () => {
+    it('retains the existing fallback for an unverified font face, rounded to half-points as Word rounds it', () => {
         const style = { ff: 'Unverified Script Face', fs: 10, va: BaselineOffset.SUPERSCRIPT };
         expect(getDocumentFontStyle(style, undefined, undefined, getDocumentCompatibilityPolicy(DocumentFlavor.TRADITIONAL))).toEqual(getFontStyleString(style));
+        const nine = { ...style, fs: 9 };
+        expect(getFontStyleString(nine).fontSize).toBeCloseTo(5.4, 6);
+        expect(getDocumentFontStyle(nine, undefined, undefined, getDocumentCompatibilityPolicy(DocumentFlavor.TRADITIONAL)).fontSize).toBe(5.5);
+    });
+
+    it.each([
+        // Word 365, probe apici of the Mosaico bench (sizes of its PDF): Queens Park, which Word sizes at three fifths,
+        // and Verdana, at the 1331/2048 of its OS/2 table, both rounded to half-points
+        ['Queens Park', 9, 5.52],
+        ['Queens Park', 11, 6.48],
+        ['Queens Park', 14, 8.52],
+        ['Queens Park', 16, 9.48],
+        ['Verdana', 8, 5.04],
+        ['Verdana', 14, 9],
+        ['Verdana', 16, 10.56],
+        ['Verdana', 20, 12.96],
+    ])('rounds the superscripts of %s at %s pt as Word (%s pt)', (family, size, word) => {
+        const style = { ff: family as string, fs: size as number, va: BaselineOffset.SUPERSCRIPT };
+        const actual = getDocumentFontStyle(style, undefined, undefined, getDocumentCompatibilityPolicy(DocumentFlavor.TRADITIONAL));
+        expect(Math.abs(actual.fontSize - (word as number))).toBeLessThan(0.061);
     });
 
     it.each([DocumentFlavor.MODERN, DocumentFlavor.TRADITIONAL])('uses inherited script sizing through Latin and East Asian glyph shaping (%s)', (flavor) => {

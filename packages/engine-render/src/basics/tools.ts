@@ -326,7 +326,8 @@ export function getFontStyleString(
     textStyle?: Nullable<ITextStyle>,
     fontFamilyFallbacks?: Record<string, string>,
     fontFamilyClasses?: IDocumentStyle['fontFamilyClasses'],
-    wordScriptSizeRatio?: number
+    wordScriptSizeRatio?: number,
+    wordScriptRounding = false
 ): IDocumentSkeletonFontStyle {
     const defaultFont = DEFAULT_STYLES.ff;
 
@@ -406,8 +407,9 @@ export function getFontStyleString(
         const { sbr, spr } = baselineOffsetInfo;
 
         fontSize *= baselineOffset === BaselineOffset.SUBSCRIPT ? sbr : spr;
-        if (useWordScriptMetrics) {
-            // Word rounds the font's precise OS/2 script size to half-points.
+        if (useWordScriptMetrics || wordScriptRounding) {
+            // Word rounds the script size to half-points, for every font (Word 365: Queens Park at 9, 11, 14 and 16 pt
+            // has superscripts of 5.5, 6.5, 8.5 and 9.5 pt, three fifths of the size rounded).
             fontSize = Math.max(0.5, Math.round(fontSize * 2) / 2);
         }
     }
