@@ -2094,11 +2094,13 @@ function _getLineOverflowHeight(
 }
 
 function _getLineOverflowTolerance(lastPage: IDocumentSkeletonPage, paragraphConfig: IParagraphConfig): number {
-    // Visible text must fit paginated body and cell bounds; blank trailing leading is excluded above.
+    // Visible text must fit paginated body and cell bounds; blank trailing leading is excluded above. A hundredth of a
+    // pixel is rounding of the measures, far below the twip Word lays out in: a line that ends 0.0066 px past the room
+    // its notes leave (the Mosaico of Golden Group, page 300) fits there, as in Word.
     return (lastPage.type === DocumentSkeletonPageType.CELL ||
         lastPage.type === DocumentSkeletonPageType.BODY) &&
         isTraditionalDocumentCompatibility(paragraphConfig.documentCompatibilityPolicy)
-        ? 1e-6
+        ? 0.01
         : LINE_LAYOUT_OVERFLOW_TOLERANCE;
 }
 
