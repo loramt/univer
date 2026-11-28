@@ -15,7 +15,7 @@
  */
 
 import type { IDocDrawingBase } from '@univerjs/core';
-import { AlignTypeH, DocumentFlavor, ObjectRelativeFromH, ObjectRelativeFromV, PositionedObjectLayoutType } from '@univerjs/core';
+import { AlignTypeH, BooleanNumber, DocumentFlavor, ObjectRelativeFromH, ObjectRelativeFromV, PositionedObjectLayoutType, SpacingRule } from '@univerjs/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IDocumentSkeletonDrawing } from '../../../basics/i-document-skeleton-cached';
 import type { UniverRenderingContext } from '../../../context';
@@ -24,7 +24,7 @@ import { Canvas } from '../../../canvas';
 import { Documents } from '../document';
 import { createParagraphLayoutTestBed } from '../layout/block/paragraph/__tests__/create-paragraph-layout-test-bed';
 import { DocumentSkeleton } from '../layout/doc-skeleton';
-import { drawDocTextBoxShape, getDocTextBox, getDocTextBoxFrame } from '../text-box';
+import { drawDocTextBoxShape, getDocTextBox, getDocTextBoxFlowStarts, getDocTextBoxFrame } from '../text-box';
 
 function skeletonDrawing(origin: Partial<IDocDrawingBase>, aLeft = 10, aTop = 20): IDocumentSkeletonDrawing {
     return {
@@ -113,6 +113,16 @@ describe('text boxes', () => {
         (ctx.stroke as unknown as ReturnType<typeof vi.fn>).mockClear();
         drawDocTextBoxShape(ctx, { geometry: 'rect' }, frame);
         expect(ctx.stroke).not.toHaveBeenCalled();
+    });
+});
+
+describe('linked text boxes', () => {
+    it('starts each box of a chain with the first line that does not fit in the boxes before it', () => {
+        const lines: Array<[number, number]> = [[0, 10], [10, 20], [20, 30], [30, 40]];
+        expect(getDocTextBoxFlowStarts(lines, [25, 30])).toEqual([0, 20]);
+        expect(getDocTextBoxFlowStarts(lines, [25, 15, 100])).toEqual([0, 20, 30]);
+        // a box the text does not reach shows nothing
+        expect(getDocTextBoxFlowStarts(lines, [100, 50])).toEqual([0, Number.POSITIVE_INFINITY]);
     });
 });
 
@@ -218,5 +228,106 @@ describe('text boxes on the page', () => {
         expect(middle).toBeGreaterThan(0);
         expect(bottom).toBeCloseTo(2 * middle, 5);
         expect(at(top).y + bottom).toBeLessThanOrEqual(374);
+    });
+
+    it('flows the text of the first box of a chain into the next box, as Word', () => {
+        // C1 of the third independent verification: the second box of a chain has no content of its own, and the
+        // text that does not fit in the first was lost, cut by its frame.
+        const frameOf = (left: number, top: number, height: number) => ({
+            unitId: 'test-doc',
+            subUnitId: 'test-doc',
+            drawingType: 0,
+            imageSourceType: 'BASE64',
+            source: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=',
+            transform: { width: 200, height, left: 0, top: 0, angle: 0 },
+            docTransform: {
+                size: { width: 200, height },
+                positionH: { relativeFrom: ObjectRelativeFromH.PAGE, posOffset: left },
+                positionV: { relativeFrom: ObjectRelativeFromV.PAGE, posOffset: top },
+                angle: 0,
+            },
+            layoutType: PositionedObjectLayoutType.WRAP_NONE,
+            behindDoc: 0,
+            distT: 0,
+            distB: 0,
+            distL: 0,
+            distR: 0,
+        });
+        const insets = { left: 10, top: 6, right: 10, bottom: 6 };
+        const text = 'Uno\rDue\rTre\rQuattro\r\n';
+        // lines 15 px high, whatever the font metrics of the test canvas
+        const paragraphs = [3, 7, 11, 19].map((startIndex, index) => ({
+            startIndex,
+            paragraphId: `p${index}`,
+            paragraphStyle: { spacingRule: SpacingRule.EXACT, lineSpacing: 15, snapToGrid: BooleanNumber.FALSE },
+        }));
+        const flow = { head: 'first', rooms: [40, 100], width: 200 };
+        const first = {
+            ...frameOf(100, 100, 52),
+            drawingId: 'first',
+            textBox: {
+                body: { dataStream: text, textRuns: [{ st: 0, ed: 21, ts: { fs: 12 } }], paragraphs, sectionBreaks: [{ startIndex: 20, sectionId: 's' }] },
+                insets,
+                flow: { ...flow, order: 0 },
+            },
+        };
+        const second = {
+            ...frameOf(350, 300, 112),
+            drawingId: 'second',
+            textBox: {
+                body: { dataStream: '\r\n', paragraphs: [{ startIndex: 0, paragraphId: 'e' }], sectionBreaks: [{ startIndex: 1, sectionId: 'e' }] },
+                insets,
+                flow: { ...flow, order: 1 },
+            },
+        };
+        const bed = createParagraphLayoutTestBed('A\b\bB', {
+            documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL, pageSize: { width: 600, height: 800 } },
+            body: {
+                customBlocks: [{ startIndex: 1, blockId: 'first' }, { startIndex: 2, blockId: 'second' }],
+                textRuns: [{ st: 0, ed: 6, ts: { fs: 12 } }],
+                paragraphs: [{ startIndex: 4, paragraphId: 'anchor' }],
+                sectionBreaks: [{ startIndex: 5, sectionId: 'section' }],
+            },
+            drawings: { first, second },
+            drawingsOrder: ['first', 'second'],
+        });
+        const skeleton = DocumentSkeleton.create(bed.viewModel, bed.ctx.docsConfig.localeService);
+        const documents = bed.injector.createInstance(Documents, 'text-box-chain', skeleton, { pageMarginLeft: 0, pageMarginTop: 0 });
+        try {
+            skeleton.calculate();
+            const ctx = canvas.getContext();
+            const glyphs: Array<{ text: string; x: number; y: number }> = [];
+            const fillText = ctx.fillText.bind(ctx);
+            vi.spyOn(ctx, 'fillText').mockImplementation((value: string, x: number, y: number) => {
+                const m = ctx.getTransform();
+                glyphs.push({ text: String(value), x: m.a * x + m.c * y + m.e, y: m.b * x + m.d * y + m.f });
+                fillText(value, x, y);
+            });
+            const rect = vi.spyOn(ctx, 'rect');
+            documents.draw(ctx);
+            const rects = rect.mock.calls.map((call) => call.slice(0, 4) as number[]);
+            const inSecond = glyphs.filter((glyph) => glyph.x >= 350 && glyph.y >= 300);
+            const inFirst = glyphs.filter((glyph) => glyph.x < 350 && glyph.y < 300);
+            // the first box shows the lines that fit in its room, cut where the next line starts
+            const firstClip = rects.find((r) => r[0] === 100 && r[1] === 106)!;
+            expect(firstClip[3]).toBeLessThanOrEqual(40);
+            expect(inFirst.filter((glyph) => glyph.text === 'U').length).toBe(1);
+            // the second box goes on with the text, from the top of its room
+            const t = inSecond.find((glyph) => glyph.text === 'T')!;
+            const q = inSecond.find((glyph) => glyph.text === 'Q')!;
+            expect(t.x).toBeGreaterThanOrEqual(360 - 0.01);
+            expect(t.y).toBeGreaterThan(306);
+            expect(t.y).toBeLessThan(306 + 20);
+            expect(q.y).toBeGreaterThan(t.y);
+            // the lines of the first box are drawn above the room of the second, where its clip leaves them out
+            const secondClip = rects.find((r) => r[0] === 350 && r[1] === 306)!;
+            expect(secondClip[3]).toBe(100);
+            expect(inSecond.some((glyph) => glyph.text === 'U' && glyph.y >= 306)).toBe(false);
+        } finally {
+            documents.dispose();
+            skeleton.dispose();
+            bed.viewModel.dispose();
+            bed.dataModel.dispose();
+        }
     });
 });

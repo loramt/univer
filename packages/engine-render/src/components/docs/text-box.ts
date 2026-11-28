@@ -40,11 +40,28 @@ export interface IDocTextBoxShape {
 }
 
 /**
+ * The place of a text box in a chain of linked boxes of Word: the text of the first box is laid out once, at its
+ * width, and each box shows the lines that follow those of the boxes before it, as many as fit in its room.
+ */
+export interface IDocTextBoxFlow {
+    /** The drawing whose content the chain shows: the first box. */
+    head: string;
+    /** The place of this box in the chain, from 0. */
+    order: number;
+    /** The room for the text of each box of the chain, in order (px). */
+    rooms: number[];
+    /** The width the text is laid out in, that of the first box (px). */
+    width: number;
+}
+
+/**
  * A drawing with a content of its own (a text box of Word): the content is laid out in the frame of the drawing,
  * within its insets, and anchored to its top, middle or bottom; the drawing keeps its place in the flow as any other.
  */
 export interface IDocTextBox {
     body: IDocumentBody;
+    /** A box of a chain of linked boxes, whose text is that of the first box of the chain. */
+    flow?: IDocTextBoxFlow;
     /** From the edges of the frame to the content (px): Word's insets with the text rectangle of the shape. */
     insets?: { left?: number; top?: number; right?: number; bottom?: number };
     verticalAlign?: 'top' | 'middle' | 'bottom';
@@ -203,12 +220,32 @@ export function drawDocTextBoxShape(ctx: UniverRenderingContext, shape: Nullable
 /** The height of the page a text box is laid out on: longer than any content, so that it has one page. */
 const TEXT_BOX_PAGE_HEIGHT = 100000;
 
+/**
+ * Where the text of each box of a chain starts, from the top of the content: a box takes the lines that end within
+ * its room, and the next box starts with the line that does not fit, as Word moves it. Infinity for a box the text
+ * does not reach. `lines` are the tops and bottoms of the lines of the content, in order.
+ */
+export function getDocTextBoxFlowStarts(lines: Array<[number, number]>, rooms: number[]): number[] {
+    const starts = [0];
+    let next = 0;
+    for (let box = 0; box < rooms.length - 1; box++) {
+        const start = starts[box];
+        while (next < lines.length && lines[next][1] - start <= rooms[box] + 0.01) {
+            next++;
+        }
+        starts.push(next < lines.length ? lines[next][0] : Number.POSITIVE_INFINITY);
+    }
+    return starts;
+}
+
 interface ITextBoxEntry {
     body: IDocumentBody;
     key: string;
     skeleton: DocumentSkeleton;
     documents: ITextBoxDocuments;
     contentHeight: number;
+    /** The tops and bottoms of the lines of the content, from its top. */
+    lines: Array<[number, number]>;
 }
 
 /** What the painter needs of the documents that draws a text box (Documents, made by the host painter). */
@@ -234,18 +271,47 @@ export class DocTextBoxPainter {
         textBox: IDocTextBox,
         frame: IDocTextBoxFrame,
         host: DocumentSkeleton,
-        pageFieldContext?: IDocumentsConfig['pageFieldContext']
+        pageFieldContext?: IDocumentsConfig['pageFieldContext'],
+        head?: IDocTextBox
     ): void {
         if (frame.width <= 0 || frame.height <= 0) {
+            return;
+        }
+        const insets = textBox.insets ?? {};
+        const top = insets.top ?? 0;
+        const room = frame.height - top - (insets.bottom ?? 0);
+        const flow = textBox.flow;
+        if (flow && head && flow.rooms.length > 1) {
+            // a box of a chain: the text of the first box, laid out once at its width, from where this box starts
+            const entry = this._entry(`flow::${flow.head}`, head, { ...frame, width: flow.width, height: 0 }, host);
+            if (!entry) {
+                return;
+            }
+            const starts = getDocTextBoxFlowStarts(entry.lines, flow.rooms);
+            const start = starts[flow.order] ?? Number.POSITIVE_INFINITY;
+            if (!Number.isFinite(start)) {
+                return;
+            }
+            const end = starts[flow.order + 1];
+            const shown = end === undefined ? room : Math.min(room, end - start);
+            const source = head.insets ?? {};
+            entry.documents.setPageFieldContext(pageFieldContext);
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(frame.left, frame.top + top, frame.width, Math.max(0, shown));
+            ctx.clip();
+            ctx.translate(frame.left + (insets.left ?? 0) - (source.left ?? 0), frame.top + top - (source.top ?? 0) - start);
+            try {
+                entry.documents.draw(ctx);
+            } finally {
+                ctx.restore();
+            }
             return;
         }
         const entry = this._entry(drawingId, textBox, frame, host);
         if (!entry) {
             return;
         }
-        const insets = textBox.insets ?? {};
-        const top = insets.top ?? 0;
-        const room = frame.height - top - (insets.bottom ?? 0);
         const share = textBox.verticalAlign === 'middle' ? 0.5 : textBox.verticalAlign === 'bottom' ? 1 : 0;
         // The page of the content starts with the top inset: middle and bottom move it by what is left of the room.
         const offset = share > 0 ? (room - entry.contentHeight) * share : 0;
@@ -322,12 +388,22 @@ export class DocTextBoxPainter {
             const skeleton = DocumentSkeleton.create(new DocumentViewModel(new DocumentDataModel(data)), host.getLocaleService());
             skeleton.calculate();
             const page = skeleton.getSkeletonData()?.pages[0];
+            const lines: Array<[number, number]> = [];
+            for (const section of page?.sections ?? []) {
+                for (const column of section.columns) {
+                    for (const line of column.lines) {
+                        lines.push([section.top + line.top, section.top + line.top + line.lineHeight]);
+                    }
+                }
+            }
+            lines.sort((a, b) => a[0] - b[0]);
             const entry: ITextBoxEntry = {
                 body: textBox.body,
                 key,
                 skeleton,
                 documents: this._createDocuments(data.id, skeleton),
                 contentHeight: page?.height ?? 0,
+                lines,
             };
             this._entries.set(drawingId, entry);
             return entry;

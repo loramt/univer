@@ -804,11 +804,18 @@ export class Documents extends DocComponent {
                 }
                 drawDocTextBoxShape(ctx, textBox.shape, placed);
                 this._textBoxes ??= new DocTextBoxPainter((key, child) => new Documents(key, child, { pageMarginLeft: 0, pageMarginTop: 0 }));
+                // a box of a chain of linked boxes shows the text of the first box of the chain
+                const flow = textBox.flow;
+                const head = flow
+                    ? flow.head === drawing.drawingId
+                        ? textBox
+                        : getDocTextBox(skeleton.getViewModel().getSnapshot().drawings?.[flow.head])
+                    : undefined;
                 this._textBoxes.draw(ctx, drawing.drawingId, textBox, placed, skeleton, {
                     pageNumber: page.pageNumber,
                     pageNumberFormat: page.pageNumberFormat,
                     pageCount,
-                });
+                }, head);
             }
         }
     }
