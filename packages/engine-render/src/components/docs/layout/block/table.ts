@@ -911,6 +911,8 @@ interface ITableRowPageHeights {
     /** The row does not fit in what is left of the page and starts the next one. */
     opensNewPage: boolean;
     firstBorderHeight: number;
+    /** The height the outer borders add to a slice of the row alone, on a page after the first. */
+    nextBorderHeight: number;
     minimumHeight: number;
     firstCellPageHeight: number;
     pageContentHeight: number;
@@ -947,7 +949,7 @@ function getTableRowPageHeights(
     const needOpenNewTable = cache.remainHeight <= firstBorderHeight ||
         (minimumHeight <= availableHeight && minimumHeight + firstBorderHeight > cache.remainHeight);
     const firstCellPageHeight = canRowSplit && !needOpenNewTable ? cache.remainHeight - firstBorderHeight : availableHeight;
-    return { opensNewPage: canRowSplit && needOpenNewTable, firstBorderHeight, minimumHeight, firstCellPageHeight, pageContentHeight, availableHeight, canRowSplit, suppressContinuationTopSpacing };
+    return { opensNewPage: canRowSplit && needOpenNewTable, firstBorderHeight, nextBorderHeight, minimumHeight, firstCellPageHeight, pageContentHeight, availableHeight, canRowSplit, suppressContinuationTopSpacing };
 }
 
 function canReusePrecomputedTableRow(
@@ -1100,7 +1102,7 @@ function dealWithTableRow(
     const { children: cellNodes, startIndex, endIndex } = rowNode;
     const rowSource = table.tableRows[row];
     const traditional = isTraditionalDocumentCompatibility(documentCompatibilityPolicy);
-    const { opensNewPage, firstBorderHeight, minimumHeight, firstCellPageHeight, pageContentHeight, availableHeight, canRowSplit, suppressContinuationTopSpacing } =
+    const { opensNewPage, firstBorderHeight, nextBorderHeight, minimumHeight, firstCellPageHeight, pageContentHeight, availableHeight, canRowSplit, suppressContinuationTopSpacing } =
         getTableRowPageHeights(curPage, skeTables, table, row, cache, traditional, isRepeatRow);
     const precomputedRowFits = !isRepeatRow && cellPageHeights == null && canReusePrecomputedTableRow(curPage, cache, rowSource, precomputedRow, firstBorderHeight, minimumHeight);
     const rowSkeletons: IDocumentSkeletonRow[] = precomputedRowFits ? [precomputedRow] : [];
@@ -1189,7 +1191,7 @@ function dealWithTableRow(
         let nextHeights: number[] | undefined;
         if (canRowSplit) {
             // A row that starts the next page is measured against that page, not against what is left of this one.
-            nextHeights = cache.notes.measureRow(curTableSkeleton, rowSkeletons, cellPageHeights, opensNewPage);
+            nextHeights = cache.notes.measureRow(curTableSkeleton, rowSkeletons, cellPageHeights, opensNewPage, [firstBorderHeight, nextBorderHeight]);
         } else if (cache.notes.renumberWholeRow(curTableSkeleton, rowSkeletons, cache.remainHeight)) {
             nextHeights = [];
         }
@@ -1224,7 +1226,7 @@ function dealWithTableRow(
             cache.remainHeight <= 0 ||
             forcedPageBreakRows.has(rowSkeleton) ||
             rowOverflowHeight > rowOverflowTolerance;
-        let remainingWithNotes = geometryOverflow ? undefined : cache.notes?.append(curTableSkeleton, rowSkeleton);
+        let remainingWithNotes = geometryOverflow ? undefined : cache.notes?.append(curTableSkeleton, rowSkeleton, borderHeight);
         const shouldOpenNewTable = geometryOverflow || (cache.notes != null && remainingWithNotes == null);
 
         if (shouldOpenNewTable) {
@@ -1263,10 +1265,12 @@ function dealWithTableRow(
                     });
                 }
             }
-            remainingWithNotes = cache.notes?.append(getCurTableSkeleton(skeTables), rowSkeleton);
+            // The row opens a slice: the slice's borders are those of a slice of this row alone.
+            const sliceBorderHeight = getTableBorderHeight(table, rowSource, rowSource, traditional, suppressContinuationTopSpacing && skeTables.length > 1, suppressBottomSpacing);
+            remainingWithNotes = cache.notes?.append(getCurTableSkeleton(skeTables), rowSkeleton, sliceBorderHeight);
             while (remainingWithNotes == null && cache.notes?.hasContinuation()) {
                 cache.notes.nextPage();
-                remainingWithNotes = cache.notes.append(getCurTableSkeleton(skeTables), rowSkeleton);
+                remainingWithNotes = cache.notes.append(getCurTableSkeleton(skeTables), rowSkeleton, sliceBorderHeight);
             }
         }
 

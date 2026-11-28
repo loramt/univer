@@ -198,6 +198,25 @@ interface IPageFootnoteLayout {
     height: number;
     separator?: IDocumentSkeletonPage;
     notice?: IDocumentSkeletonPage;
+    /**
+     * Where the body of the page ends when a note that starts on the page continues on the next one: Word puts
+     * nothing of the body below the line that holds its reference, even when the note leaves room there.
+     */
+    bodyEnd?: number;
+}
+
+/** Whether a note that starts in the plan's notes continues on the next page. */
+function continuesOwnNote(plan: IPageFootnoteLayout): boolean {
+    return plan.following[0]?.some((fragment) => fragment.continued && plan.referenceIds.includes(fragment.noteId) &&
+        plan.fragments.some((own) => !own.continued && own.noteId === fragment.noteId)) === true;
+}
+
+/**
+ * Where the body of the page may end with the plan's notes below it. A note that continues takes the whole page below
+ * the line of its reference (its last line may go up to 2 px further, as lines do), and the body ends with that line.
+ */
+function planBodyLimit(contentHeight: number, plan: IPageFootnoteLayout): number {
+    return plan.bodyEnd ?? contentHeight - plan.height;
 }
 
 type FootnoteDecorationKind = IDocumentSkeletonNoteDecoration['kind'];
@@ -440,7 +459,12 @@ export class DocumentFootnoteLayout {
                 }
                 return changed;
             },
-            measureRow: (table: IDocumentSkeletonTable, rows: IDocumentSkeletonTable['rows'], previousHeights?: readonly number[], startsOnNextPage = false): number[] | undefined => {
+            /**
+             * The heights of the parts of a row that its notes allow, page by page. borders are the heights the table's
+             * outer borders add to a slice that ends with the first part and with a later one: the notes are measured
+             * below the slice as it is laid out on the page.
+             */
+            measureRow: (table: IDocumentSkeletonTable, rows: IDocumentSkeletonTable['rows'], previousHeights?: readonly number[], startsOnNextPage = false, borders: readonly [number, number] = [0, 0]): number[] | undefined => {
                 let measurePage = { ...current, skeTables: new Map(current.skeTables) };
                 const measurePages = [measurePage];
                 this._inherited.set(measurePage, this._getInherited(current, pages, config));
@@ -460,6 +484,7 @@ export class DocumentFootnoteLayout {
                     const row = rows[index];
                     const onCurrentPage = index === 0 && !startsOnNextPage;
                     const offset = onCurrentPage ? top + table.height : 0;
+                    const border = index === 0 ? borders[0] : borders[1];
                     const contentHeight = measurePage.pageHeight - measurePage.marginTop - measurePage.marginBottom;
                     const available = heights[index] ?? contentHeight - offset;
                     const lines = row.cells
@@ -483,7 +508,7 @@ export class DocumentFootnoteLayout {
                         lines,
                         lines[lines.length - 1]?.bottom ?? Math.min(row.height, available),
                         (keptLines, bottom) => {
-                            const limit = this.getBodyLimit(measurePage, measurePages, config, offset + bottom, [...keptLines.flatMap((line) => line.glyphs), ...preceding]) - offset;
+                            const limit = this.getBodyLimit(measurePage, measurePages, config, offset + bottom + border, [...keptLines.flatMap((line) => line.glyphs), ...preceding]) - offset - border;
                             const deferredIds = new Set(this._pages.get(measurePage)?.following.flatMap((fragments) => fragments
                                 .filter((fragment) => !fragment.continued)
                                 .map((fragment) => fragment.noteId)));
@@ -506,12 +531,17 @@ export class DocumentFootnoteLayout {
                 }
                 return changed ? heights : undefined;
             },
-            append: (table: IDocumentSkeletonTable, row: IDocumentSkeletonTable['rows'][number]): number | undefined => {
+            /**
+             * What is left of the page for rows and the slice's borders after the row, or undefined when the notes do
+             * not let the row end the slice there; border is the height the outer borders add to the slice if it ends
+             * with the row, so that the notes are measured below the slice as it is laid out.
+             */
+            append: (table: IDocumentSkeletonTable, row: IDocumentSkeletonTable['rows'][number], border = 0): number | undefined => {
                 const previous = this._pages.get(current);
                 const incoming = [...table.rows, row].flatMap((item) => item.cells.flatMap(collectPageReferenceGlyphs));
                 const bottom = top + table.height + row.height;
-                const limit = this.getBodyLimit(current, pages, config, bottom, incoming);
-                if (bottom <= limit + 0.01) {
+                const limit = this.getBodyLimit(current, pages, config, bottom + border, incoming);
+                if (bottom + border <= limit + 0.01) {
                     return Math.max(0, limit - bottom);
                 }
                 if (previous) {
@@ -561,7 +591,7 @@ export class DocumentFootnoteLayout {
         if (previous && previous.referenceIds.length === referenceIds.length &&
             previous.referenceIds.every((id, index) => id === referenceIds[index])) {
             this._position(page, previous, bodyBottom);
-            return contentHeight - previous.height;
+            return planBodyLimit(contentHeight, previous);
         }
 
         const firstReference = this._references.get(inherited.fragments[0]?.noteId ?? referenceIds[0]);
@@ -589,9 +619,43 @@ export class DocumentFootnoteLayout {
                 }
             }
         }
+        // Word ends the page's body with the line of a reference whose note continues on the next page (probe
+        // note-continuate: plain paragraphs and a table row that would fit; the Mosaico of Golden Group, page 263).
+        if (continuesOwnNote(plan)) {
+            plan.bodyEnd = bodyBottom;
+        }
         this._pages.set(page, plan);
         this._position(page, plan, bodyBottom);
-        return contentHeight - plan.height;
+        return planBodyLimit(contentHeight, plan);
+    }
+
+    /**
+     * Whether a note that the table references would continue on the next page if the table were laid out whole on
+     * the page: Word ends the page with the line of its reference, so the table is laid out row by row. Measured on
+     * a copy of the page, whose notes stay as they are.
+     */
+    tableContinuesNote(
+        page: IDocumentSkeletonPage,
+        currentPages: IDocumentSkeletonPage[],
+        config: ISectionBreakConfig,
+        table: IDocumentSkeletonTable
+    ): boolean {
+        if (page.type !== DocumentSkeletonPageType.BODY || page.segmentId !== '') {
+            return false;
+        }
+        const references = table.rows.flatMap((row) => row.cells.flatMap(collectPageReferenceGlyphs));
+        if (!references.some((glyph) => glyph.noteId && this._references.has(glyph.noteId))) {
+            return false;
+        }
+        const probe = { ...page, skeTables: new Map(page.skeTables) };
+        this._inherited.set(probe, this._getInherited(page, currentPages, config));
+        const accepted = this._pages.get(page);
+        if (accepted) {
+            this._pages.set(probe, accepted);
+        }
+        this.getBodyLimit(probe, [probe], config, table.top + table.height, references);
+        const plan = this._pages.get(probe);
+        return plan != null && continuesOwnNote(plan);
     }
 
     finish(pages: IDocumentSkeletonPage[], config: ISectionBreakConfig): void {
