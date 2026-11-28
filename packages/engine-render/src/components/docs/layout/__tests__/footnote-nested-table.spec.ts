@@ -105,6 +105,28 @@ function noteText(pages: IDocumentSkeletonPage[], noteId: string): string {
         column.lines.flatMap((line) => line.divides.flatMap((divide) => divide.glyphGroup))))).filter((glyph) => glyph.count > 0).map((glyph) => glyph.raw).join('');
 }
 
+describe('a row that opens its page with a nested table and notes', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    // The verifier's probe v8-alte-50 (B2 of the eighth check): the first part of the row, laid out for the room its
+    // notes leave, came out a little taller than that room, and went to the next page: the first page stayed empty.
+    // A part that opens the page stays there, as a paragraph does.
+    it.each([300, 350, 400, 450, 500, 550, 600])('keeps the first part of the row on the first page (page %i)', (pageHeight) => {
+        const bed = nestedTableWithNotes(0, pageHeight);
+        const skeleton = DocumentSkeleton.create(bed.viewModel, bed.ctx.docsConfig.localeService);
+        try {
+            skeleton.calculate();
+            const pages = skeleton.getSkeletonData()!.pages;
+            const lines = (page: IDocumentSkeletonPage): number => [...page.skeTables.values()].flatMap((table) => table.rows.flatMap((row) => row.cells)).reduce((sum, cell) => sum + cell.sections.flatMap((section) => section.columns.flatMap((column) => column.lines)).length +
+                    [...cell.skeTables.values()].flatMap((table) => table.rows.flatMap((row) => row.cells)).reduce((inner, page) => inner + page.sections.flatMap((section) => section.columns.flatMap((column) => column.lines)).length, 0), 0);
+            expect(lines(pages[0])).toBeGreaterThan(0);
+        } finally {
+            bed.viewModel.dispose();
+            bed.dataModel.dispose();
+        }
+    });
+});
+
 describe('notes of a table nested in a row that splits', () => {
     afterEach(() => vi.restoreAllMocks());
 

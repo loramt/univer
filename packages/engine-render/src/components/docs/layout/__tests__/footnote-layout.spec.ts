@@ -449,6 +449,57 @@ describe('footnote body layout', () => {
         }
     });
 
+    it('lays out once the note of a header row that the table repeats on its pages', () => {
+        // The verifier's probes v8-intestazione-corpo, -52 and -55 (H1 of the eighth check): Word lays out the note of
+        // a repeated header row on the first page of the table only; the copies of the header on the next pages bring
+        // no note, which took room at the foot of every page.
+        const T = DataStreamTreeTokenType;
+        const cell = (text: string) => `${T.TABLE_CELL_START}${text}${T.SECTION_BREAK}${T.TABLE_CELL_END}`;
+        const rows = Array.from({ length: 80 }, (_, row) => `${T.TABLE_ROW_START}${cell(row === 0 ? `Intestazione￼${T.PARAGRAPH}` : `Riga ${row}${T.PARAGRAPH}`)}${T.TABLE_ROW_END}`).join('');
+        const tableStream = `${T.TABLE_START}${rows}${T.TABLE_END}`;
+        const dataStream = `Prima${T.PARAGRAPH}${tableStream}\r\n`;
+        const reference = dataStream.indexOf('￼');
+        const noteStream = 'Nota dell intestazione\r\n';
+        const bed = createParagraphLayoutTestBed('', {
+            documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL, pageSize: { width: 400, height: 400 } },
+            body: {
+                dataStream,
+                paragraphs: [...dataStream.matchAll(/\r/g)].map((match, index) => ({ startIndex: match.index!, paragraphId: `p-${index}` })),
+                sectionBreaks: [...dataStream.matchAll(/\n/g)].map((match, index) => ({ startIndex: match.index!, sectionId: `s-${index}` })),
+                tables: [{ tableId: 'table', startIndex: 'Prima\r'.length, endIndex: 'Prima\r'.length + tableStream.length }],
+                customRanges: [{ rangeId: 'reference', rangeType: CustomRangeType.FOOTNOTE, startIndex: reference, endIndex: reference, wholeEntity: true, properties: { noteId: 'note' } }],
+            },
+            tableSource: {
+                table: {
+                    tableId: 'table',
+                    align: 0,
+                    indent: { v: 0 },
+                    textWrap: 0,
+                    size: { type: 0, width: { v: 300 } },
+                    tableRows: Array.from({ length: 80 }, (_, row) => ({ cantSplit: 0, repeatHeaderRow: row === 0 ? 1 : 0, tableCells: [{ size: { type: 0, width: { v: 300 } } }], trHeight: { val: { v: 0 }, hRule: 0 } })),
+                    tableColumns: [{ size: { type: 0, width: { v: 300 } } }],
+                },
+            },
+            notes: { note: { type: 'footnote' as const, noteId: 'note', body: {
+                dataStream: noteStream,
+                paragraphs: [{ paragraphId: 'note-0', startIndex: noteStream.length - 2 }],
+                sectionBreaks: [{ sectionId: 'note-section', startIndex: noteStream.length - 1 }],
+            } } },
+        });
+        const skeleton = DocumentSkeleton.create(bed.viewModel, bed.ctx.docsConfig.localeService);
+        try {
+            skeleton.calculate();
+            const pages = skeleton.getSkeletonData()!.pages;
+            expect(pages.length).toBeGreaterThan(2);
+            // the header is on every page of the table, its note only under the first
+            expect(pages.every((page) => [...page.skeTables.values()].some((table) => table.rows[0]?.index === 0))).toBe(true);
+            expect(pages.map((page) => (page.notes ?? []).filter((note) => note.noteId === 'note').length)).toEqual(pages.map((_, index) => (index === 0 ? 1 : 0)));
+        } finally {
+            bed.viewModel.dispose();
+            bed.dataModel.dispose();
+        }
+    });
+
     it('reserves inherited paragraph after-spacing at the end of a note', () => {
         const bed = createParagraphLayoutTestBed('Reference\uFFFC', {
             documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL, defaultParagraphStyle: { spaceBelow: { v: 13 } } },

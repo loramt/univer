@@ -241,6 +241,15 @@ function footnoteContentHeight(fragments: IDocumentSkeletonNote[]): number {
     return fragments.reduce((height, fragment) => Math.max(height, fragment.page.height), 0);
 }
 
+/**
+ * The rows of a table slice whose note references count: not the header rows the table repeats on its later pages,
+ * whose notes Word lays out once, on the page of the header itself (the verifier's probes v8-intestazione-corpo, -52
+ * and -55: H1 of the eighth check).
+ */
+function referenceRows(rows: IDocumentSkeletonTable['rows']): IDocumentSkeletonTable['rows'] {
+    return rows.filter((row) => row.isRepeatRow !== true);
+}
+
 function collectPageReferenceGlyphs(page: IDocumentSkeletonPage): IDocumentSkeletonGlyph[] {
     const result: IDocumentSkeletonGlyph[] = [];
     for (const section of page.sections) {
@@ -253,7 +262,7 @@ function collectPageReferenceGlyphs(page: IDocumentSkeletonPage): IDocumentSkele
         }
     }
     for (const table of page.skeTables.values()) {
-        result.push(...table.rows.flatMap((row) => row.cells.flatMap(collectPageReferenceGlyphs)));
+        result.push(...referenceRows(table.rows).flatMap((row) => row.cells.flatMap(collectPageReferenceGlyphs)));
     }
     for (const group of page.skeColumnGroups.values()) {
         result.push(...group.columns.flatMap((column) => collectPageReferenceGlyphs(column.page)));
@@ -272,7 +281,7 @@ function collectCellReferenceLines(page: IDocumentSkeletonPage, offset = 0): { t
         return glyphs.length > 0 ? [{ top, bottom: top + line.lineHeight + page.marginBottom, glyphs }] : [];
     })));
     for (const table of page.skeTables.values()) {
-        for (const row of table.rows) {
+        for (const row of referenceRows(table.rows)) {
             lines.push(...row.cells.flatMap((cell) => collectCellReferenceLines(cell, offset + page.marginTop + table.top + row.top)));
         }
     }
@@ -439,7 +448,7 @@ export class DocumentFootnoteLayout {
         table: IDocumentSkeletonTable,
         keepReferences = false
     ): number {
-        const references = table.rows.flatMap((row) => row.cells.flatMap(collectPageReferenceGlyphs));
+        const references = referenceRows(table.rows).flatMap((row) => row.cells.flatMap(collectPageReferenceGlyphs));
         return this.getBodyLimit(page, currentPages, config, table.top + table.height, references, keepReferences);
     }
 
@@ -474,7 +483,7 @@ export class DocumentFootnoteLayout {
                     this._pages.set(target, accepted);
                 }
                 let offset = top + table.height;
-                let preceding = table.rows.flatMap((row) => row.cells.flatMap(collectPageReferenceGlyphs));
+                let preceding = referenceRows(table.rows).flatMap((row) => row.cells.flatMap(collectPageReferenceGlyphs));
                 let changed = false;
                 for (const row of rows) {
                     const glyphs = row.cells.flatMap(collectPageReferenceGlyphs);
@@ -541,7 +550,7 @@ export class DocumentFootnoteLayout {
                         .sort((left, right) => left.bottom - right.bottom);
                     const incoming = lines.flatMap((line) => line.glyphs);
                     if (onCurrentPage) {
-                        incoming.push(...table.rows.flatMap((item) => item.cells.flatMap(collectPageReferenceGlyphs)));
+                        incoming.push(...referenceRows(table.rows).flatMap((item) => item.cells.flatMap(collectPageReferenceGlyphs)));
                     }
                     // A cell is shaped before its physical page is known. Rebuild the
                     // row when its page-local marker changes, including marker width.
@@ -605,11 +614,18 @@ export class DocumentFootnoteLayout {
              */
             append: (table: IDocumentSkeletonTable, row: IDocumentSkeletonTable['rows'][number], border = 0): number | undefined => {
                 const previous = this._pages.get(current);
-                const incoming = [...table.rows, row].flatMap((item) => item.cells.flatMap(collectPageReferenceGlyphs));
+                const incoming = referenceRows([...table.rows, row]).flatMap((item) => item.cells.flatMap(collectPageReferenceGlyphs));
                 const bottom = top + table.height + row.height;
                 const limit = this.getBodyLimit(current, pages, config, bottom + border, incoming);
                 if (bottom + border <= limit + 0.01) {
                     return Math.max(0, limit - bottom);
+                }
+                // A part that opens the page stays there, as a paragraph does, and the notes that cannot start on the
+                // page start on the next one: on the next page it would open the page just the same, and the page
+                // before stayed empty (the verifier's probe v8-alte-50, B2 of the eighth check, where a part with a
+                // nested table, laid out for the room its notes leave, came out 0.9 px taller than that room).
+                if (top <= 0.01 && table.rows.length === 0 && this._getInherited(current, pages, config).fragments.length === 0) {
+                    return Math.max(0, this.getBodyLimit(current, pages, config, bottom + border, incoming, true) - bottom);
                 }
                 if (previous) {
                     this._pages.set(current, previous);
@@ -619,6 +635,12 @@ export class DocumentFootnoteLayout {
                 return undefined;
             },
             hasContinuation: () => this._getInherited(current, pages, config).fragments.length > 0,
+            /**
+             * Whether the table's slice opens the page: nothing of the body before it, none of its rows yet, no note
+             * continued from the page before. A row there would open the next page just the same.
+             */
+            opensPage: (table: IDocumentSkeletonTable) => top <= 0.01 && table.rows.length === 0 &&
+                this._getInherited(current, pages, config).fragments.length === 0,
             nextPage: () => {
                 current = createSkeletonPage(this._ctx, config, this._ctx.skeletonResourceReference, getNextSkeletonPageNumber(current, config));
                 pages.push(current);
@@ -723,7 +745,7 @@ export class DocumentFootnoteLayout {
         if (page.type !== DocumentSkeletonPageType.BODY || page.segmentId !== '') {
             return false;
         }
-        const references = table.rows.flatMap((row) => row.cells.flatMap(collectPageReferenceGlyphs));
+        const references = referenceRows(table.rows).flatMap((row) => row.cells.flatMap(collectPageReferenceGlyphs));
         if (!references.some((glyph) => glyph.noteId && this._references.has(glyph.noteId))) {
             return false;
         }

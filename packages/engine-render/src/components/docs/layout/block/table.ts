@@ -1240,7 +1240,7 @@ function dealWithTableRow(
         const shouldOpenNewTable = geometryOverflow || (cache.notes != null && remainingWithNotes == null);
 
         if (shouldOpenNewTable && firstPart && !geometryOverflow && rowSkeletons.length > 0 && !opensNewPage &&
-            !isRepeatRow && cache.rowOpensNextPage !== row) {
+            !isRepeatRow && cache.rowOpensNextPage !== row && cache.notes?.opensPage(curTableSkeleton) !== true) {
             // The first part of a row that splits cannot stay with its notes on this page. It was measured for what
             // is left of the page: on the next page it would keep that height and leave the rest of the row to the
             // page after. The row is laid out again as opening the next page, where Word moves it whole (probe
