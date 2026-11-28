@@ -319,10 +319,11 @@ describe('text boxes on the page', () => {
             expect(t.y).toBeGreaterThan(306);
             expect(t.y).toBeLessThan(306 + 20);
             expect(q.y).toBeGreaterThan(t.y);
-            // the lines of the first box are drawn above the room of the second, where its clip leaves them out
+            // each box draws its own lines only: none of the first box above the room of the second
             const secondClip = rects.find((r) => r[0] === 350 && r[1] === 306)!;
             expect(secondClip[3]).toBe(100);
-            expect(inSecond.some((glyph) => glyph.text === 'U' && glyph.y >= 306)).toBe(false);
+            expect(inSecond.some((glyph) => glyph.text === 'U' || glyph.text === 'D')).toBe(false);
+            expect(inFirst.some((glyph) => glyph.text === 'T' || glyph.text === 'Q')).toBe(false);
         } finally {
             documents.dispose();
             skeleton.dispose();

@@ -246,6 +246,8 @@ interface ITextBoxEntry {
     contentHeight: number;
     /** The tops and bottoms of the lines of the content, from its top. */
     lines: Array<[number, number]>;
+    /** The lines of the content, with their top, to draw only those of a box of a chain. */
+    lineRefs: Array<{ top: number; line: { divides: unknown[] } }>;
 }
 
 /** What the painter needs of the documents that draws a text box (Documents, made by the host painter). */
@@ -296,6 +298,14 @@ export class DocTextBoxPainter {
             const shown = end === undefined ? room : Math.min(room, end - start);
             const source = head.insets ?? {};
             entry.documents.setPageFieldContext(pageFieldContext);
+            // only the lines of this box are drawn: the descenders of the line above would show at its top
+            const hidden: Array<[{ divides: unknown[] }, unknown[]]> = [];
+            for (const { top: lineTop, line } of entry.lineRefs) {
+                if (lineTop < start - 0.01 || (end !== undefined && lineTop >= end - 0.01)) {
+                    hidden.push([line, line.divides]);
+                    line.divides = [];
+                }
+            }
             ctx.save();
             ctx.beginPath();
             ctx.rect(frame.left, frame.top + top, frame.width, Math.max(0, shown));
@@ -305,6 +315,9 @@ export class DocTextBoxPainter {
                 entry.documents.draw(ctx);
             } finally {
                 ctx.restore();
+                for (const [line, divides] of hidden) {
+                    line.divides = divides;
+                }
             }
             return;
         }
@@ -389,10 +402,12 @@ export class DocTextBoxPainter {
             skeleton.calculate();
             const page = skeleton.getSkeletonData()?.pages[0];
             const lines: Array<[number, number]> = [];
+            const lineRefs: ITextBoxEntry['lineRefs'] = [];
             for (const section of page?.sections ?? []) {
                 for (const column of section.columns) {
                     for (const line of column.lines) {
                         lines.push([section.top + line.top, section.top + line.top + line.lineHeight]);
+                        lineRefs.push({ top: section.top + line.top, line: line as unknown as { divides: unknown[] } });
                     }
                 }
             }
@@ -404,6 +419,7 @@ export class DocTextBoxPainter {
                 documents: this._createDocuments(data.id, skeleton),
                 contentHeight: page?.height ?? 0,
                 lines,
+                lineRefs,
             };
             this._entries.set(drawingId, entry);
             return entry;
