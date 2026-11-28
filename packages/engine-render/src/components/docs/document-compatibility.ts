@@ -208,6 +208,98 @@ export function applyFontMetricCompatibility(
     };
 }
 
+/**
+ * The families whose subscripts and superscripts Word sizes at 1331/2048 of the font size: the OS/2 ySubscriptYSize
+ * and ySuperscriptYSize of their regular face in Windows 11 (78 of the 129 families installed there, read in the VM
+ * of the word-fidelity bench, step 08-apici), as Word 365 sizes them (the verifier's probes v7-apici and v7-apici2:
+ * Arial, Calibri, Cambria, Courier New, Garamond, Georgia, Segoe UI, Tahoma, Times New Roman, Verdana, Book Antiqua,
+ * Calibri Light, Candara, Century Gothic, Constantia and Trebuchet MS), and Times, Franklin Gothic Book and Open Sans.
+ */
+const WORD_SCRIPT_1331_FAMILIES = new Set([
+    'arial',
+    'arial black',
+    'arial narrow',
+    'book antiqua',
+    'bookman old style',
+    'bradley hand itc',
+    'calibri',
+    'calibri light',
+    'cambria',
+    'cambria math',
+    'candara',
+    'candara light',
+    'century',
+    'century gothic',
+    'comic sans ms',
+    'consolas',
+    'constantia',
+    'corbel',
+    'corbel light',
+    'courier new',
+    'ebrima',
+    'franklin gothic book',
+    'franklin gothic medium',
+    'freestyle script',
+    'french script mt',
+    'gadugi',
+    'garamond',
+    'georgia',
+    'kristen itc',
+    'leelawadee',
+    'leelawadee ui',
+    'leelawadee ui semilight',
+    'lucida console',
+    'lucida sans unicode',
+    'malgun gothic',
+    'malgun gothic semilight',
+    'microsoft jhenghei',
+    'microsoft jhenghei light',
+    'microsoft jhenghei ui',
+    'microsoft jhenghei ui light',
+    'microsoft new tai lue',
+    'microsoft phagspa',
+    'microsoft sans serif',
+    'microsoft tai le',
+    'microsoft uighur',
+    'microsoft yahei',
+    'microsoft yahei light',
+    'microsoft yahei ui',
+    'microsoft yahei ui light',
+    'monotype corsiva',
+    'ms outlook',
+    'ms reference sans serif',
+    'ms reference specialty',
+    'mv boli',
+    'myanmar text',
+    'nirmala text',
+    'nirmala text semilight',
+    'nirmala ui',
+    'nirmala ui semilight',
+    'open sans',
+    'papyrus',
+    'pristina',
+    'segoe mdl2 assets',
+    'segoe print',
+    'segoe script',
+    'segoe ui',
+    'segoe ui black',
+    'segoe ui emoji',
+    'segoe ui historic',
+    'segoe ui light',
+    'segoe ui semibold',
+    'segoe ui semilight',
+    'segoe ui symbol',
+    'segoe ui variable',
+    'symbol',
+    'tahoma',
+    'tempus sans itc',
+    'times',
+    'times new roman',
+    'trebuchet ms',
+    'verdana',
+    '微软雅黑',
+]);
+
 export function getDocumentFontStyle(
     textStyle?: Nullable<ITextStyle>,
     fontFamilyFallbacks?: Record<string, string>,
@@ -220,9 +312,9 @@ export function getDocumentFontStyle(
         const family = (textStyle.ff || DEFAULT_STYLES.ff).split(',')[0].trim().replace(/^['"]|['"]$/g, '');
         if (/^(?:SimSun|宋体|DengXian|等线|PMingLiU)$/i.test(family)) {
             wordScriptSizeRatio = 0.5;
-        } else if (/^(?:Arial|Arial Narrow|Times|Times New Roman|Calibri|Cambria|Segoe UI|Consolas|Microsoft YaHei|微软雅黑|Franklin Gothic Book|Georgia|Lucida Sans Unicode|Open Sans|Symbol|Tahoma|Verdana)$/i.test(family)) {
+        } else if (WORD_SCRIPT_1331_FAMILIES.has(family.toLowerCase())) {
             wordScriptSizeRatio = 1331 / 2048;
-        } else if (/^Aptos$/i.test(family)) {
+        } else if (/^Aptos(?: Display| Narrow)?$/i.test(family)) {
             wordScriptSizeRatio = 1229 / 2048;
         } else if (/^Palatino Linotype$/i.test(family)) {
             wordScriptSizeRatio = 1230 / 2048;

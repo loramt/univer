@@ -282,6 +282,15 @@ describe('Word document script font sizes', () => {
         ['Verdana', 14, 9],
         ['Verdana', 16, 10.56],
         ['Verdana', 20, 12.96],
+        // the verifier's probes v7-apici and v7-apici2: faces whose OS/2 in Windows sizes scripts at 1331/2048 (step
+        // 08-apici of the bench), and Aptos Display at 1229/2048 as Aptos
+        ['Century Gothic', 12, 8.04],
+        ['Courier New', 11, 6.96],
+        ['Garamond', 13, 8.52],
+        ['Book Antiqua', 10, 6.48],
+        ['Trebuchet MS', 9, 6],
+        ['Constantia', 12, 8.04],
+        ['Aptos Display', 11, 6.48],
     ])('rounds the superscripts of %s at %s pt as Word (%s pt)', (family, size, word) => {
         const style = { ff: family as string, fs: size as number, va: BaselineOffset.SUPERSCRIPT };
         const actual = getDocumentFontStyle(style, undefined, undefined, getDocumentCompatibilityPolicy(DocumentFlavor.TRADITIONAL));
