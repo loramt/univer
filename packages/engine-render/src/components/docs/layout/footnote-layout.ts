@@ -544,13 +544,18 @@ export class DocumentFootnoteLayout {
                     // Word does not end the first part of a row, below other content of the page, with a single line
                     // of a cell that holds a note reference there: the row goes to the next page (probes
                     // righe-minime-note and righe-orfane; the Mosaico of Golden Group, page 183). A single line without
-                    // a reference, or two lines with one, end the part (righe-orfane D1, D3, D5).
+                    // a reference, or two lines with one, end the part (righe-orfane D1, D3, D5), and so does a single
+                    // line whose note starts below it and continues on the next page: Word ends the page with that
+                    // line (the verifier's probes v8r-lunga-40 and -44, a note of 20 lines).
                     const partHeight = Math.min(capacity, row.height);
-                    if (onCurrentPage && offset > 0.01 && (rows.length > 1 || row.height > capacity + 0.01) &&
-                        lines.some((line) => (line.atTop && line.bottom > partHeight + 0.01) ||
-                            (line.bottom <= partHeight + 0.01 && countCellLinesWithin(line.cell, partHeight) < 2))) {
-                        // Its first part would hold nothing, or a single line with a reference.
-                        return 'next-page';
+                    if (onCurrentPage && offset > 0.01 && (rows.length > 1 || row.height > capacity + 0.01)) {
+                        const opensEmpty = lines.some((line) => line.atTop && line.bottom > partHeight + 0.01);
+                        const kept = lines.filter((line) => line.bottom <= partHeight + 0.01);
+                        const single = kept.some((line) => countCellLinesWithin(line.cell, partHeight) < 2);
+                        if (opensEmpty || (single && !this._partContinuesNote(measurePage, measurePages, config, offset + partHeight + border, [...kept.flatMap((line) => line.glyphs), ...preceding]))) {
+                            // Its first part would hold nothing, or a single line with a reference.
+                            return 'next-page';
+                        }
                     }
                     if (row.height > capacity + 0.01 && capacity + 0.01 < available) {
                         heights[index] = capacity;
@@ -664,6 +669,19 @@ export class DocumentFootnoteLayout {
         this._pages.set(page, plan);
         this._position(page, plan, bodyBottom);
         return planBodyLimit(contentHeight, plan);
+    }
+
+    /** Whether, with the body ending at bodyBottom and these references, a note that starts on the page continues. */
+    private _partContinuesNote(
+        page: IDocumentSkeletonPage,
+        currentPages: IDocumentSkeletonPage[],
+        config: ISectionBreakConfig,
+        bodyBottom: number,
+        incoming: IDocumentSkeletonGlyph[]
+    ): boolean {
+        this.getBodyLimit(page, currentPages, config, bodyBottom, incoming);
+        const plan = this._pages.get(page);
+        return plan != null && continuesOwnNote(plan);
     }
 
     /**
