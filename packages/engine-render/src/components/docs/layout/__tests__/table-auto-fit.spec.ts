@@ -30,12 +30,102 @@ import {
     TableTextWrapType,
 } from '@univerjs/core';
 import { describe, expect, it, vi } from 'vitest';
+import type { IWordAutoFit } from '../table-auto-fit';
 import { createParagraphLayoutTestBed } from '../block/paragraph/__tests__/create-paragraph-layout-test-bed';
 import { resolveTableLayoutColumns } from '../block/table';
 import { DocumentSkeleton } from '../doc-skeleton';
 import { FontCache } from '../shaping-engine/font-cache';
 import { resolveTableAutoFitColumns } from '../table-auto-fit';
 import { clearFontCreateConfigCache } from '../tools';
+
+describe('autofit tables of Word', () => {
+    /** Lays out a one-row table of these texts (4 px a character, no padding) on a page 600 px wide. */
+    function columnsOf(texts: string[], autoFit: IWordAutoFit, grid = texts.map(() => 200)) {
+        const previousContext = Reflect.get(FontCache, '_context');
+        Reflect.set(FontCache, '_context', null);
+        FontCache.invalidateMetrics(() => true);
+        const context = {
+            font: '',
+            measureText(this: CanvasRenderingContext2D, value: string) {
+                // 4 px a character at 11 pt, in proportion at the size the font cache measures with
+                const match = this.font.match(/([\d.]+)(pt|px)/);
+                const ratio = (match ? Number(match[1]) * (match[2] === 'px' ? 0.75 : 1) : 11) / 11;
+                return { width: value.length * 4 * ratio, fontBoundingBoxAscent: 8 * ratio, fontBoundingBoxDescent: 2 * ratio, actualBoundingBoxAscent: 8 * ratio, actualBoundingBoxDescent: 2 * ratio };
+            },
+        } as unknown as CanvasRenderingContext2D;
+        const canvas = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+        const T = DataStreamTreeTokenType;
+        const row = `${T.TABLE_ROW_START}${texts.map((value) => `${T.TABLE_CELL_START}${value}${T.PARAGRAPH}${T.SECTION_BREAK}${T.TABLE_CELL_END}`).join('')}${T.TABLE_ROW_END}`;
+        const stream = `${T.TABLE_START}${row}${T.TABLE_END}`;
+        const dataStream = `${stream}${T.PARAGRAPH}${T.SECTION_BREAK}`;
+        const zero = { start: { v: 0 }, end: { v: 0 }, top: { v: 0 }, bottom: { v: 0 } };
+        // as the converter of Word documents writes it: fixed, with its own columns, and the preferred widths
+        const source = {
+            tableId: 'word-fit',
+            align: TableAlignmentType.START,
+            indent: { v: 0 },
+            textWrap: TableTextWrapType.NONE,
+            position: { positionH: { relativeFrom: ObjectRelativeFromH.PAGE }, positionV: { relativeFrom: ObjectRelativeFromV.PAGE } },
+            dist: { distT: 0, distB: 0, distL: 0, distR: 0 },
+            size: { type: TableSizeType.SPECIFIED, width: { v: grid.reduce((sum, width) => sum + width, 0) } },
+            layout: TableLayoutType.FIXED,
+            cellMargin: zero,
+            tableColumns: grid.map((width) => ({ size: { type: TableSizeType.SPECIFIED, width: { v: width } } })),
+            tableRows: [{ trHeight: { hRule: TableRowHeightRule.AUTO, val: { v: 0 } }, tableCells: texts.map(() => ({ margin: zero })) }],
+            wordAutoFit: autoFit,
+        } as ITable;
+        const bed = createParagraphLayoutTestBed(stream, {
+            body: {
+                paragraphs: Array.from(dataStream).flatMap((token, startIndex) => token === T.PARAGRAPH ? [{ startIndex, paragraphId: `p-${startIndex}`, paragraphStyle: { lineSpacing: 16, spacingRule: SpacingRule.EXACT, snapToGrid: BooleanNumber.FALSE } }] : []),
+                sectionBreaks: Array.from(dataStream).flatMap((token, startIndex) => token === T.SECTION_BREAK ? [{ startIndex, sectionId: `s-${startIndex}` }] : []),
+                tables: [{ tableId: source.tableId, startIndex: 0, endIndex: stream.length }],
+            },
+            tableSource: { [source.tableId]: source },
+            documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL, textStyle: { ff: 'Arial', fs: 11 }, pageSize: { width: 600, height: 800 }, marginLeft: 0, marginRight: 0 },
+        });
+        const skeleton = DocumentSkeleton.create(bed.viewModel, bed.sectionBreakConfig.localeService);
+        try {
+            skeleton.calculate();
+            const table = skeleton.getSkeletonData()!.pages[0].skeTables.get(source.tableId)!;
+            return table.tableSource.tableColumns.map((column) => Math.round(column.size.width.v * 100) / 100);
+        } finally {
+            skeleton.dispose();
+            bed.viewModel.dispose();
+            bed.dataModel.dispose();
+            canvas.mockRestore();
+            Reflect.set(FontCache, '_context', previousContext);
+            FontCache.invalidateMetrics(() => true);
+            clearFontCreateConfigCache();
+        }
+    }
+    const auto = { type: 'auto' as const, value: 0 };
+    const long = 'aa bb '.repeat(33).trim();
+
+    it('gives up the room of the columns without a width first, by what they have above their narrowest', () => {
+        // a table of the whole width: a long text (788 px on one line), a short one (20 px) and a word (12 px); 220 px
+        // too many, taken by what each has above its narrowest word (780, 12, 0)
+        expect(columnsOf([long, 'xx yy', 'zzz'], { width: { type: 'pct', value: 1 }, columns: [auto, auto, auto] }))
+            .toEqual([571.33, 16.67, 12]);
+    });
+
+    it('gives the columns in percent their share while the shares add up to 100%', () => {
+        // three columns at 50%: the third gets none and keeps the room of its word
+        const half = { type: 'pct' as const, value: 0.5 };
+        expect(columnsOf(['aaa', 'bbb', 'parole'], { width: { type: 'pct', value: 1 }, columns: [half, half, half] }))
+            .toEqual([288, 288, 24]);
+    });
+
+    it('gives the room left to the columns without a width, by their widest', () => {
+        expect(columnsOf(['aa', 'bbbb', 'cccccc'], { width: { type: 'pct', value: 1 }, columns: [auto, auto, auto] }))
+            .toEqual([100, 200, 300]);
+    });
+
+    it('keeps the lengths of a table without a width of its own that fits', () => {
+        const length = (value: number) => ({ type: 'dxa' as const, value });
+        expect(columnsOf(['aa', 'bb'], { width: { type: 'auto', value: 0 }, columns: [length(100), length(150)] }, [300, 300]))
+            .toEqual([100, 150]);
+    });
+});
 
 describe('table auto fit', () => {
     it.each([

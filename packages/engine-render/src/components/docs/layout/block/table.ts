@@ -53,7 +53,7 @@ import {
     startSkeletonCellPagesBuild,
     stepSkeletonCellPagesBuild,
 } from '../model/page';
-import { resolveTableAutoFitColumns } from '../table-auto-fit';
+import { resolveTableAutoFitColumns, resolveWordAutoFitColumns } from '../table-auto-fit';
 import { getCellBorderWidth, getTableCellSpacing, getTableOuterBorder, hasTableCellSpacing, resolveTableCellSpacing } from '../table-cell-spacing';
 // Body, header and footer streams can share both table IDs and character offsets.
 const precomputedTableSkeletons = new WeakMap<ILayoutContext, WeakMap<DataStreamTreeNode, IDocumentSkeletonTable>>();
@@ -1592,8 +1592,10 @@ function resolveTableForLayout(
     config: ISectionBreakConfig,
     source: ITable
 ): ITable {
+    // an autofit table of Word: its columns divided by their content, as Word divides them
+    const fitted = resolveWordAutoFitColumns(ctx, viewModel, tableNode, config, source, getTableAvailableWidth(page));
     const table = resolveTableLayoutColumns(
-        source,
+        fitted,
         getTableAvailableWidth(page),
         isTraditionalDocumentCompatibility(config.documentCompatibilityPolicy ?? getDocumentCompatibilityPolicy()),
         viewModel.getSnapshot?.()
