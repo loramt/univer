@@ -2227,7 +2227,7 @@ function _lineOperator(
     }
     const calculatedLineTop = positionedCustomBlockOnly
         ? tableFlowTop
-        : calculateLineTopByDrawings(
+        : _belowPlacedFloatingTables(ctx, lastPage, column, section.top, lineHeight, paragraphConfig.paragraphIndex, calculateLineTopByDrawings(
             lineHeight,
             tableFlowTop,
             lastPage,
@@ -2240,7 +2240,7 @@ function _lineOperator(
                 ? Math.max(TRADITIONAL_TABLE_WRAP_MIN_WIDTH, Math.min(__getGlyphGroupWidth(glyphGroup) - 0.001, column.width - 1))
                 : 0,
             _getLegacyParagraphWrapSpacing(ctx, paragraphConfig, paragraphEnd, spaceBelowApply)
-        ); // WRAP_TOP_AND_BOTTOM drawing and WRAP NONE table will change the starting top of the line
+        )); // WRAP_TOP_AND_BOTTOM drawing and WRAP NONE table will change the starting top of the line
     // An empty anchor keeps its mark height, but has no text to wrap below its own picture.
     const emptyTraditionalAnchor = isTraditionalDocumentCompatibility(paragraphConfig.documentCompatibilityPolicy!) &&
         __isPositionedCustomBlockOnlyLine(glyphGroup, paragraphNonInlineSkeDrawings);
@@ -2489,6 +2489,41 @@ function __updateAndPositionDrawings(
     );
 }
 
+/**
+ * The top of a line below the floating tables already placed on its page whose paragraph comes after it, when they
+ * leave no room beside them in its column: Word lays the lines that such a table covers below it (probe
+ * tabelle-flottanti F1: the empty paragraph before a table 127 twips above its paragraph, in a cell with no room
+ * beside it, goes below the table). The table is in the float cache from the pass that placed it; its paragraph has
+ * not placed it again yet.
+ */
+function _belowPlacedFloatingTables(
+    ctx: ILayoutContext,
+    page: IDocumentSkeletonPage,
+    column: IDocumentSkeletonColumn,
+    sectionTop: number,
+    lineHeight: number,
+    paragraphIndex: number,
+    lineTop: number
+): number {
+    let top = lineTop;
+    for (const [id, placed] of ctx.floatObjectsCache) {
+        const float = placed.floatObject;
+        if (float.type !== FloatObjectType.TABLE || page.skeTables.has(id) || placed.page.segmentId !== page.segmentId ||
+            placed.page.pageNumber !== page.pageNumber || float.anchorParagraph == null || paragraphIndex >= float.anchorParagraph) {
+            continue;
+        }
+        const dist = float.dist ?? { distT: 0, distB: 0, distL: 0, distR: 0 };
+        const spansColumn = float.left - dist.distL <= column.left + 0.01 &&
+            float.left + float.width + dist.distR >= column.left + column.width - 0.01;
+        const floatTop = float.top - dist.distT;
+        const floatBottom = float.top + float.height + dist.distB;
+        if (spansColumn && sectionTop + top < floatBottom && sectionTop + top + lineHeight > floatTop) {
+            top = floatBottom - sectionTop;
+        }
+    }
+    return top;
+}
+
 function __updateWrapTablePosition(
     ctx: ILayoutContext,
     table: IDocumentSkeletonTable,
@@ -2498,13 +2533,23 @@ function __updateWrapTablePosition(
     paragraphIndex: number,
     drawingAnchorTop?: number
 ) {
-    const wrapTablePosition = __getWrapTablePosition(table, column, lineTop, lineHeight, drawingAnchorTop);
+    let wrapTablePosition = __getWrapTablePosition(table, column, lineTop, lineHeight, drawingAnchorTop);
 
     if (wrapTablePosition == null) {
         return;
     }
 
     const { tableId: id, width, height, tableSource } = table;
+    // Word places a floating table from where its paragraph stood before the text flowed around it: once placed on its
+    // page it stays there, also when the lines before it that it covers go below it and push its paragraph down (the
+    // Mosaico of Golden Group, page 317; probe tabelle-flottanti F1: a table 127 twips above its paragraph, in a cell
+    // with no room beside it, sends the empty paragraph before it below itself).
+    const page = column.parent?.parent;
+    const placed = ctx.floatObjectsCache.get(id);
+    if (placed && page && placed.floatObject.type === FloatObjectType.TABLE && placed.page.segmentId === page.segmentId &&
+        placed.page.pageNumber === page.pageNumber) {
+        wrapTablePosition = { ...wrapTablePosition, left: placed.floatObject.left, top: placed.floatObject.top };
+    }
     const { left, top } = wrapTablePosition;
 
     const floatObject: IFloatObject = {
@@ -2516,6 +2561,8 @@ function __updateWrapTablePosition(
         angle: 0,
         type: FloatObjectType.TABLE,
         positionV: tableSource.position.positionV,
+        dist: tableSource.dist,
+        anchorParagraph: paragraphIndex,
     };
 
     _reLayoutCheck(ctx, [floatObject], column, paragraphIndex);

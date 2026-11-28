@@ -2055,6 +2055,9 @@ export interface IFloatObject {
     effectExtent?: IDocDrawingBase['effectExtent'];
     type: FloatObjectType;
     positionV: IObjectPositionV;
+    /** For a floating table, its distances from the text around it, and the paragraph that holds it. */
+    dist?: { distT: number; distB: number; distL: number; distR: number };
+    anchorParagraph?: number;
 }
 
 // The context state of the layout process, which is used to store some cache and intermediate states in the typesetting process,
