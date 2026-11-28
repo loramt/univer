@@ -1797,10 +1797,11 @@ export class Documents extends DocComponent {
         };
         // Floating tables can extend past their anchor cell into a neighbouring
         // gutter. Preserve ancestor clips without applying that cell's text clip.
+        // Word draws a table that opens its cell whole too, past the cell's edges.
         const floatingTables = new Map([...skeTables].filter(([, table]) =>
             nestedPage.type === DocumentSkeletonPageType.CELL && !isVerticalCell &&
             this._getDocumentFlavor() === DocumentFlavor.TRADITIONAL &&
-            table.tableSource.textWrap === TableTextWrapType.WRAP
+            (table.tableSource.textWrap === TableTextWrapType.WRAP || table.opensCell === true)
         ));
         if (floatingTables.size > 0) {
             drawNestedTables(floatingTables);

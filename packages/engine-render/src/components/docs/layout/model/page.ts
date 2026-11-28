@@ -15,7 +15,7 @@
  */
 
 import type { IDocumentBody, ITable, ITableRow, Nullable } from '@univerjs/core';
-import { BooleanNumber, CustomRangeType, DocumentDataModel, DocumentFlavor, GridType, ObjectRelativeFromV, PageOrientType, PositionedObjectLayoutType, TableAlignmentType, TableTextWrapType } from '@univerjs/core';
+import { BooleanNumber, CustomRangeType, DataStreamTreeNodeType, DocumentDataModel, DocumentFlavor, GridType, ObjectRelativeFromV, PageOrientType, PositionedObjectLayoutType, TableAlignmentType, TableTextWrapType } from '@univerjs/core';
 import type {
     IDocumentSkeletonHeaderFooter,
     IDocumentSkeletonPage,
@@ -921,6 +921,7 @@ export function createSkeletonCellPages(
         cellNode.startIndex,
         sectionBreakConfig.documentCompatibilityPolicy ?? getDocumentCompatibilityPolicy()
     );
+    markCellOpeningTable(viewModel, sectionNode, pages);
 
     applyTrailingBlockRangeSpaceBelow(pages, body, cellNode.endIndex);
     applyTrailingCellParagraphSpaceBelow(pages, body, cellNode.endIndex, cellSectionBreakConfig);
@@ -932,6 +933,29 @@ export function createSkeletonCellPages(
     finishVerticalCellLayout(pages, verticalCellWidth);
 
     return pages;
+}
+
+/**
+ * Marks the table that is the first block of a cell (its paragraph holds it before any text, and no paragraph comes
+ * before that one), on every page of the cell: Word draws it whole, past the cell's edges when it is wider (the
+ * verifier's probes v7-annidate-larghe: 19 cases out of 19), and clips at the cell's edges a table with a paragraph
+ * before it, even an empty one (18 out of 18).
+ */
+function markCellOpeningTable(viewModel: DocumentViewModel, sectionNode: DataStreamTreeNode | undefined, pages: IDocumentSkeletonPage[]): void {
+    const tableNode = sectionNode?.children?.[0]?.children?.[0];
+    if (tableNode?.nodeType !== DataStreamTreeNodeType.TABLE) {
+        return;
+    }
+    const tableId = viewModel.getTableByStartIndex?.(tableNode.startIndex)?.tableSource?.tableId;
+    if (tableId == null) {
+        return;
+    }
+    for (const page of pages) {
+        const table = page.skeTables.get(tableId);
+        if (table) {
+            table.opensCell = true;
+        }
+    }
 }
 
 export interface ICellSkeletonBuildState {
@@ -1049,6 +1073,7 @@ export function stepSkeletonCellPagesBuild(state: ICellSkeletonBuildState): bool
             state.cellNode.startIndex,
             state.sectionBreakConfig.documentCompatibilityPolicy ?? getDocumentCompatibilityPolicy()
         );
+        markCellOpeningTable(state.viewModel, state.sectionNode, state.pages);
         applyTrailingBlockRangeSpaceBelow(
             state.pages,
             state.ctx.dataModel?.getBody?.(),

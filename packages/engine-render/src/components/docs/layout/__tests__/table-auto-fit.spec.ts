@@ -120,8 +120,8 @@ describe('autofit tables of Word', () => {
             .toEqual([100, 200, 300]);
     });
 
-    /** The columns of an autofit table of these texts nested in the second cell of a fixed table. */
-    function nestedColumnsOf(texts: string[]) {
+    /** An autofit table of these texts nested in the second cell of a fixed table, after what the cell has before it. */
+    function nestedTableOf(texts: string[], before = '') {
         const previousContext = Reflect.get(FontCache, '_context');
         Reflect.set(FontCache, '_context', null);
         FontCache.invalidateMetrics(() => true);
@@ -135,7 +135,7 @@ describe('autofit tables of Word', () => {
         const T = DataStreamTreeTokenType;
         const cell = (content: string) => `${T.TABLE_CELL_START}${content}${T.PARAGRAPH}${T.SECTION_BREAK}${T.TABLE_CELL_END}`;
         const inner = `${T.TABLE_START}${T.TABLE_ROW_START}${texts.map(cell).join('')}${T.TABLE_ROW_END}${T.TABLE_END}`;
-        const outer = `${T.TABLE_START}${T.TABLE_ROW_START}${cell('esterna')}${cell(inner)}${T.TABLE_ROW_END}${T.TABLE_END}`;
+        const outer = `${T.TABLE_START}${T.TABLE_ROW_START}${cell('esterna')}${cell(before + inner)}${T.TABLE_ROW_END}${T.TABLE_END}`;
         const dataStream = `${outer}${T.PARAGRAPH}${T.SECTION_BREAK}`;
         const zero = { start: { v: 0 }, end: { v: 0 }, top: { v: 0 }, bottom: { v: 0 } };
         const table = (tableId: string, grid: number[], autoFit?: IWordAutoFit) => ({
@@ -166,8 +166,7 @@ describe('autofit tables of Word', () => {
         try {
             skeleton.calculate();
             const outerTable = skeleton.getSkeletonData()!.pages[0].skeTables.get('outer')!;
-            const nested = outerTable.rows[0].cells[1].skeTables.get('inner')!;
-            return nested.tableSource.tableColumns.map((column) => Math.round(column.size.width.v * 100) / 100);
+            return outerTable.rows[0].cells[1].skeTables.get('inner')!;
         } finally {
             skeleton.dispose();
             bed.viewModel.dispose();
@@ -178,6 +177,18 @@ describe('autofit tables of Word', () => {
             clearFontCreateConfigCache();
         }
     }
+
+    function nestedColumnsOf(texts: string[]) {
+        return nestedTableOf(texts).tableSource.tableColumns.map((column) => Math.round(column.size.width.v * 100) / 100);
+    }
+
+    it('marks a nested table that opens its cell, which Word draws past the cell\'s edges', () => {
+        // The verifier's probes v7-annidate-larghe: Word clips a nested table wider than its cell only when a paragraph,
+        // even an empty one, comes before it in the cell (18 cases out of 18); the cell's first block it draws whole.
+        expect(nestedTableOf(['aa', long]).opensCell).toBe(true);
+        expect(nestedTableOf(['aa', long], DataStreamTreeTokenType.PARAGRAPH).opensCell).toBeUndefined();
+        expect(nestedTableOf(['aa', long], `prima${DataStreamTreeTokenType.PARAGRAPH}`).opensCell).toBeUndefined();
+    });
 
     it('keeps the grid of an autofit table nested in a fixed table', () => {
         // Word 365 (probe v5-annidate of the fifth verification): two columns of 75 pt, with long text and with short

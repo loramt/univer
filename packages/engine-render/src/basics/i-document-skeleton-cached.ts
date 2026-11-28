@@ -202,6 +202,11 @@ export interface IDocumentSkeletonTable {
     tableId: string; // table id
     tableSource: ITable;
     hasPageBreak?: boolean;
+    /**
+     * A table nested in a cell as the cell's first block. Word draws it whole, past the cell's edges when it is wider;
+     * a table with a paragraph before it in the cell, even an empty one, is clipped at the cell's edges.
+     */
+    opensCell?: boolean;
     parent?: IDocumentSkeletonPage;
 }
 
