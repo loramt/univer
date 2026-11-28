@@ -38,6 +38,15 @@ function segments(document: IDocumentData, text: string): string[] {
 }
 
 describe('document word wrapping', () => {
+    it('keeps words joined by a slash whole in Word documents', () => {
+        const word: IDocumentData = { id: 'doc', documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL } };
+        // Word never ends a line at a slash between letters: "6/A" and "titolarità/rappresentanza" move whole.
+        expect(segments(word, 'allegato 6/A e titolarità/rappresentanza')).toEqual(['allegato ', '6/A ', 'e ', 'titolarità/rappresentanza']);
+        expect(segments(word, 'teleriscaldamento/ teleraffrescamento')).toEqual(['teleriscaldamento/ ', 'teleraffrescamento']);
+        const modern: IDocumentData = { id: 'doc', documentStyle: { documentFlavor: DocumentFlavor.MODERN } };
+        expect(segments(modern, 'titolarità/rappresentanza')).toEqual(['titolarità/', 'rappresentanza']);
+    });
+
     it('breaks after a dash but not before one that follows a word, as Word does', () => {
         const document: IDocumentData = { id: 'doc', documentStyle: { documentFlavor: DocumentFlavor.MODERN } };
         // Word measured with every dash at the margin: em dash, en dash and hyphen behave the same.

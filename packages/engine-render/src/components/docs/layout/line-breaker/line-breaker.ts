@@ -18,7 +18,7 @@ import type { Nullable } from '@univerjs/core';
 import { BooleanNumber } from '@univerjs/core';
 import type { ILineBreakRule } from './rule';
 import { Break, BreakPointType } from './break';
-import { AI, AL, B2, BA, BK, CB, CJ, CR, H2, H3, HL, HY, ID, JL, JT, JV, LF, NL, NS, OP, QU, RI, SA, SG, SP, WJ, XX, ZWJ } from './classes';
+import { AI, AL, B2, BA, BK, CB, CJ, CR, H2, H3, HL, HY, ID, JL, JT, JV, LF, NL, NS, OP, QU, RI, SA, SG, SP, SY, WJ, XX, ZWJ } from './classes';
 import { CI_BRK, CP_BRK, DI_BRK, IN_BRK, pairTable, PR_BRK } from './pairs';
 import { Rule } from './rule';
 import data from './trie-data';
@@ -262,11 +262,29 @@ function noteReferenceClass(charClass: number, codePoint: Nullable<number>): num
 }
 
 export class WordLineBreaker extends LineBreaker {
+    /** The character before the last one read: before a slash, whether the slash joins two words. */
+    protected _codePointBeforeLast: Nullable<number> = null;
+
+    /**
+     * @param keepsSlashedWords Word documents: no break after a slash between a letter or a digit and a letter. Word
+     * keeps "6/A" and "titolarità/rappresentanza" whole: in 176 of its PDFs of the bench no line ends at one of 1681
+     * slashes between words, while Unicode allows the break there. The slashes of a scheme ("https://") keep their
+     * break, which marks the start of a link (the link enhancer, which breaks links at their hyphens).
+     */
+    constructor(content: string, private readonly _keepsSlashedWords = false) {
+        super(content);
+    }
+
     protected override _nextCharClass() {
+        this._codePointBeforeLast = this._lastCodePoint;
         return noteReferenceClass(super._nextCharClass(), this._codePoint);
     }
 
     protected override _pairBreak(curClass: number, nextClass: number): number {
+        if (this._keepsSlashedWords && curClass === SY && (nextClass === AL || nextClass === HL) &&
+            this._codePointBeforeLast != null && /[\p{L}\p{N}]/u.test(String.fromCodePoint(this._codePointBeforeLast))) {
+            return IN_BRK;
+        }
         const pair = pairTable[curClass][nextClass];
         if (nextClass === B2 && pair === DI_BRK && pairTable[curClass][BA] === IN_BRK) {
             return IN_BRK;
@@ -286,15 +304,17 @@ export class DocumentLineBreaker extends WordLineBreaker {
         content: string,
         private readonly _wordWrap: BooleanNumber,
         private readonly _languageAt?: (offset: number) => string | undefined,
-        private readonly _inferKorean = true
+        private readonly _inferKorean = true,
+        keepsSlashedWords = false
     ) {
-        super(content);
+        super(content, keepsSlashedWords);
     }
 
     protected override _nextCharClass() {
         const offset = this._pos;
         const nextCodePoint = this._getNextCodePoint();
         const rawClass = classTrie.get(nextCodePoint);
+        this._codePointBeforeLast = this._lastCodePoint;
         this._lastCodePoint = this._codePoint;
         this._codePoint = nextCodePoint;
 

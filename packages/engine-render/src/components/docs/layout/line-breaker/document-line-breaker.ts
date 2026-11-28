@@ -21,14 +21,15 @@ import { DocumentLineBreaker, WordLineBreaker } from './line-breaker';
 
 export function createDocumentLineBreaker(document: IDocumentData, paragraphStyle: IParagraphStyle, content: string, start: number, body: IDocumentBody | undefined = document.body): LineBreaker {
     const wordWrap = paragraphStyle.wordWrap ?? BooleanNumber.FALSE;
+    const keepsSlashedWords = document.documentStyle?.documentFlavor === DocumentFlavor.TRADITIONAL;
     if (wordWrap === BooleanNumber.FALSE ? !/\p{Script=Hangul}/u.test(content) : !/\p{Script=Latin}/u.test(content)) {
-        return new WordLineBreaker(content);
+        return new WordLineBreaker(content, keepsSlashedWords);
     }
     const inferKorean = document.documentStyle?.documentFlavor === DocumentFlavor.MODERN
         || document.documentStyle?.documentFlavor === DocumentFlavor.TRADITIONAL
         || document.documentStyle?.documentFlavor === DocumentFlavor.DRAWINGML;
     if (wordWrap === BooleanNumber.FALSE && inferKorean) {
-        return new DocumentLineBreaker(content, wordWrap);
+        return new DocumentLineBreaker(content, wordWrap, undefined, true, keepsSlashedWords);
     }
     const defaultLanguage = paragraphStyle.textStyle?.lang ?? document.documentStyle?.textStyle?.lang;
     const runs = body?.textRuns ?? [];
@@ -50,5 +51,5 @@ export function createDocumentLineBreaker(document: IDocumentData, paragraphStyl
         const run = runs[runIndex];
         // Excel shapes require authored Korean language; Docs and Slides also recognize Hangul without that marker.
         return (run && run.st <= index ? run.ts?.lang : undefined) ?? defaultLanguage;
-    }, inferKorean);
+    }, inferKorean, keepsSlashedWords);
 }
