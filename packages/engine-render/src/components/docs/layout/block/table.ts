@@ -547,6 +547,11 @@ interface ICreateTableCache {
      * the footnotes of its page, for example).
      */
     slicePageHeight?: number;
+    /**
+     * How many pages after the one the table started on its current slice is. A slice opened on a page where no row
+     * of the table fitted is not kept, so the number of slices does not count the pages.
+     */
+    slicePageOffset?: number;
     repeatRows: DataStreamTreeNode[];
     repeatRowsHeight: number;
     notes?: ReturnType<DocumentFootnoteLayout['createTablePagination']>;
@@ -1209,7 +1214,11 @@ function dealWithTableRow(
         const shouldOpenNewTable = geometryOverflow || (cache.notes != null && remainingWithNotes == null);
 
         if (shouldOpenNewTable) {
-            cache.slicePageHeight = getContinuationPageHeight(curPage, sectionBreakConfig, skeTables.length);
+            // Every new slice is on the next page, also after a page where no row of the table fitted (a table that
+            // starts at the foot of a cell page): its height is that of the page it is on (a table inside a cell of a
+            // row that a note shortens on one page took that height on the page after it too).
+            cache.slicePageOffset = (cache.slicePageOffset ?? 0) + 1;
+            cache.slicePageHeight = getContinuationPageHeight(curPage, sectionBreakConfig, cache.slicePageOffset);
             cache.notes?.nextPage();
             if ((cache.notes || hasTrailingParagraphSpace) && skeTables.length === 1 && curTableSkeleton.rows.length === 0) {
                 cache.fromCurrentPage = false;
