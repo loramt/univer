@@ -15,7 +15,7 @@
  */
 
 import type { IDocumentBody, ITable, ITableRow, Nullable } from '@univerjs/core';
-import { BooleanNumber, CustomRangeType, DocumentDataModel, GridType, ObjectRelativeFromV, PageOrientType, PositionedObjectLayoutType, TableAlignmentType, TableTextWrapType } from '@univerjs/core';
+import { BooleanNumber, CustomRangeType, DocumentDataModel, DocumentFlavor, GridType, ObjectRelativeFromV, PageOrientType, PositionedObjectLayoutType, TableAlignmentType, TableTextWrapType } from '@univerjs/core';
 import type {
     IDocumentSkeletonHeaderFooter,
     IDocumentSkeletonPage,
@@ -927,6 +927,7 @@ export function createSkeletonCellPages(
 
     updateInlineDrawingCoordsAndBorder(ctx, pages);
     expandCellPageHeightForInlineDrawings(pages);
+    expandCellPageHeightForFloatingDrawings(ctx, pages);
     expandCellPageHeightForFlowTables(pages);
     finishVerticalCellLayout(pages, verticalCellWidth);
 
@@ -1061,6 +1062,7 @@ export function stepSkeletonCellPagesBuild(state: ICellSkeletonBuildState): bool
         );
         updateInlineDrawingCoordsAndBorder(state.ctx, state.pages);
         expandCellPageHeightForInlineDrawings(state.pages);
+        expandCellPageHeightForFloatingDrawings(state.ctx, state.pages);
         expandCellPageHeightForFlowTables(state.pages);
         finishVerticalCellLayout(state.pages, state.verticalCellWidth);
         state.complete = true;
@@ -1130,6 +1132,29 @@ export function expandCellPageHeightForInlineDrawings(pages: IDocumentSkeletonPa
             if (drawingBottom > page.height) {
                 page.height = drawingBottom;
             }
+        });
+    }
+}
+
+/**
+ * Word grows a table cell to hold the drawings anchored in it that the text wraps around: in Word 365 a picture 40 pt
+ * high, 30 pt below the top of its cell, makes the row 70 pt high, wherever its text ends.
+ */
+export function expandCellPageHeightForFloatingDrawings(ctx: ILayoutContext, pages: IDocumentSkeletonPage[]) {
+    if (ctx.dataModel?.documentStyle?.documentFlavor !== DocumentFlavor.TRADITIONAL) {
+        return;
+    }
+    for (const page of pages) {
+        page.skeDrawings?.forEach((drawing) => {
+            const layoutType = drawing.drawingOrigin?.layoutType;
+            if (
+                layoutType == null ||
+                layoutType === PositionedObjectLayoutType.INLINE ||
+                layoutType === PositionedObjectLayoutType.WRAP_NONE
+            ) {
+                return;
+            }
+            page.height = Math.max(page.height, (drawing.aTop ?? 0) + (drawing.height ?? 0));
         });
     }
 }

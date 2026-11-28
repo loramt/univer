@@ -5482,7 +5482,7 @@ describe('doc skeleton', () => {
                         angle: 0,
                         size: { width: 40, height: 20 },
                         positionH: { relativeFrom, posOffset },
-                        positionV: { relativeFrom: ObjectRelativeFromV.PARAGRAPH, posOffset: 0 },
+                        positionV: { relativeFrom: ObjectRelativeFromV.PARAGRAPH, posOffset: 80 },
                     },
                 },
             },
@@ -5518,6 +5518,8 @@ describe('doc skeleton', () => {
             const cell = skeleton.getSkeletonData()!.pages[0].skeTables.get('table')!.rows[0].cells[0];
             expect(cell.marginLeft).toBe(10);
             expect(cell.skeDrawings.get('picture')!.aLeft).toBeCloseTo(left, 6);
+            // and grows the cell to hold it when it reaches below the text: here 80 below the paragraph
+            expect(cell.height).toBeGreaterThanOrEqual(cell.skeDrawings.get('picture')!.aTop + 20);
         } finally {
             skeleton.dispose();
             model.dispose();
