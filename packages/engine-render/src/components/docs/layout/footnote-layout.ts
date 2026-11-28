@@ -322,18 +322,22 @@ export interface INoteReferenceLine {
 export function findNoteRowCapacity(
     lines: readonly INoteReferenceLine[],
     fullBottom: number,
-    measure: (keptLines: readonly INoteReferenceLine[], bottom: number) => { limit: number; deferredIds: ReadonlySet<string> }
+    measure: (keptLines: readonly INoteReferenceLine[], bottom: number) => { limit: number; deferredIds: ReadonlySet<string> },
+    movable = false
 ): number {
-    // Lines that open their cell page stay whatever happens to their notes (they would continue on the next page).
+    // Lines that open their cell page stay whatever happens to their notes (they would continue on the next page),
+    // unless the row can move: its part below other content of the page can go to the next page whole.
     let fixed = 0;
-    while (fixed < lines.length && lines[fixed].atTop) {
-        fixed++;
+    if (!movable) {
+        while (fixed < lines.length && lines[fixed].atTop) {
+            fixed++;
+        }
     }
     for (let kept = lines.length; kept >= fixed; kept--) {
         const keptLines = lines.slice(0, kept);
         const bottom = kept === lines.length ? fullBottom : (keptLines[kept - 1]?.bottom ?? 0);
         const { limit, deferredIds } = measure(keptLines, bottom);
-        const deferred = keptLines.some((line) => !line.atTop && line.glyphs.some((glyph) => deferredIds.has(glyph.noteId!)));
+        const deferred = keptLines.some((line) => (movable || !line.atTop) && line.glyphs.some((glyph) => deferredIds.has(glyph.noteId!)));
         if (kept === fixed || (!deferred && limit >= bottom)) {
             const capacity = Math.min(limit, lines[kept]?.split ?? Number.POSITIVE_INFINITY);
             return Math.max(1, kept === fixed && kept > 0 ? Math.max(capacity, bottom) : capacity);
@@ -534,7 +538,8 @@ export class DocumentFootnoteLayout {
                                 .filter((fragment) => !fragment.continued)
                                 .map((fragment) => fragment.noteId)));
                             return { limit, deferredIds };
-                        }
+                        },
+                        onCurrentPage && offset > 0.01
                     );
                     // Word does not end the first part of a row, below other content of the page, with a single line
                     // of a cell that holds a note reference there: the row goes to the next page (probes
@@ -542,7 +547,9 @@ export class DocumentFootnoteLayout {
                     // a reference, or two lines with one, end the part (righe-orfane D1, D3, D5).
                     const partHeight = Math.min(capacity, row.height);
                     if (onCurrentPage && offset > 0.01 && (rows.length > 1 || row.height > capacity + 0.01) &&
-                        lines.some((line) => line.bottom <= partHeight + 0.01 && countCellLinesWithin(line.cell, partHeight) < 2)) {
+                        lines.some((line) => (line.atTop && line.bottom > partHeight + 0.01) ||
+                            (line.bottom <= partHeight + 0.01 && countCellLinesWithin(line.cell, partHeight) < 2))) {
+                        // Its first part would hold nothing, or a single line with a reference.
                         return 'next-page';
                     }
                     if (row.height > capacity + 0.01 && capacity + 0.01 < available) {

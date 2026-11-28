@@ -73,4 +73,11 @@ describe('findNoteRowCapacity', () => {
         const lines = referenceLines([0, 30]);
         expect(findNoteRowCapacity(lines, 47, pageWithNotes(40, 50))).toBe(17);
     });
+
+    it('ends the part before the first reference line of a row that can move, when its note has no room', () => {
+        // the row starts below other content of the page: Word moves it to the next page (the Mosaico of Golden Group,
+        // page 183), so its first reference line does not stay whatever happens to its note
+        const lines = referenceLines([0, 30]);
+        expect(findNoteRowCapacity(lines, 47, pageWithNotes(40, 50), true)).toBe(3);
+    });
 });
