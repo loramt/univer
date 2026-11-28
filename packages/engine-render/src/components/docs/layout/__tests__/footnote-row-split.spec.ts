@@ -80,4 +80,13 @@ describe('findNoteRowCapacity', () => {
         const lines = referenceLines([0, 30]);
         expect(findNoteRowCapacity(lines, 47, pageWithNotes(40, 50), true)).toBe(3);
     });
+
+    it('keeps the reference line of a continuing note in a row that can move, also with the limit rounded', () => {
+        // the note continues on the next page, so the body ends with its reference line: the limit is the line's bottom,
+        // measured back from the page (the verifier's probe v8r-lunga-40: 16.00999999999995 for 16.01). The line stays
+        // and the part ends with it; without the tolerance the part held nothing and the row went to the next page.
+        const lines = referenceLines([0]).map((line) => ({ ...line, bottom: 16.01 }));
+        const capacity = findNoteRowCapacity(lines, 16.01, () => ({ limit: 16.00999999999995, deferredIds: new Set<string>() }), true);
+        expect(capacity).toBeCloseTo(16.01, 6);
+    });
 });

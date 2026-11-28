@@ -1236,8 +1236,11 @@ function dealWithTableRow(
             cache.remainHeight <= 0 ||
             forcedPageBreakRows.has(rowSkeleton) ||
             rowOverflowHeight > rowOverflowTolerance;
-        let remainingWithNotes = geometryOverflow ? undefined : cache.notes?.append(curTableSkeleton, rowSkeleton, borderHeight);
-        const shouldOpenNewTable = geometryOverflow || (cache.notes != null && remainingWithNotes == null);
+        // A row whose first part could not end on this page with its notes was laid out again as opening the next
+        // page: it goes there, even where the notes would now let it end the page whole.
+        const movesToNextPage = firstPart && opensNewPage && cache.rowOpensNextPage === row && !isRepeatRow;
+        let remainingWithNotes = geometryOverflow || movesToNextPage ? undefined : cache.notes?.append(curTableSkeleton, rowSkeleton, borderHeight);
+        const shouldOpenNewTable = geometryOverflow || movesToNextPage || (cache.notes != null && remainingWithNotes == null);
 
         if (shouldOpenNewTable && firstPart && !geometryOverflow && rowSkeletons.length > 0 && !opensNewPage &&
             !isRepeatRow && cache.rowOpensNextPage !== row) {

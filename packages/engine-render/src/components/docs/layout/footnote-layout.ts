@@ -338,7 +338,9 @@ export function findNoteRowCapacity(
         const bottom = kept === lines.length ? fullBottom : (keptLines[kept - 1]?.bottom ?? 0);
         const { limit, deferredIds } = measure(keptLines, bottom);
         const deferred = keptLines.some((line) => (movable || !line.atTop) && line.glyphs.some((glyph) => deferredIds.has(glyph.noteId!)));
-        if (kept === fixed || (!deferred && limit >= bottom)) {
+        // A note that continues ends the body with its reference line: the limit is that line's bottom, measured back
+        // from the page, and rounding must not lose it (the verifier's probe v8r-lunga-40: 16.00999999999995 for 16.01).
+        if (kept === fixed || (!deferred && limit >= bottom - 0.01)) {
             const capacity = Math.min(limit, lines[kept]?.split ?? Number.POSITIVE_INFINITY);
             return Math.max(1, kept === fixed && kept > 0 ? Math.max(capacity, bottom) : capacity);
         }
