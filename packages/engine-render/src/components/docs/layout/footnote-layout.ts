@@ -375,10 +375,19 @@ export class DocumentFootnoteLayout {
         page: IDocumentSkeletonPage,
         currentPages: IDocumentSkeletonPage[],
         config: ISectionBreakConfig,
-        table: IDocumentSkeletonTable
+        table: IDocumentSkeletonTable,
+        keepReferences = false
     ): number {
         const references = table.rows.flatMap((row) => row.cells.flatMap(collectPageReferenceGlyphs));
-        return this.getBodyLimit(page, currentPages, config, table.top + table.height, references);
+        return this.getBodyLimit(page, currentPages, config, table.top + table.height, references, keepReferences);
+    }
+
+    /** Whether the page holds the rest of notes that the page before it could not finish. */
+    inheritsNotes(page: IDocumentSkeletonPage, currentPages: IDocumentSkeletonPage[], config: ISectionBreakConfig): boolean {
+        if (page.type !== DocumentSkeletonPageType.BODY || page.segmentId !== '') {
+            return false;
+        }
+        return this._getInherited(page, currentPages, config).fragments.length > 0;
     }
 
     /** Measure table slices without publishing speculative notes on body pages. */
@@ -521,12 +530,19 @@ export class DocumentFootnoteLayout {
         };
     }
 
+    /**
+     * Where the body of the page may end with the notes of its references below it, or -1 when a note cannot start on
+     * the page: the content with its reference has to go to the next page. With keepReferences the content stays
+     * whatever happens (nothing comes before it on the page, so the next page would be the same): the notes that
+     * cannot start on the page start on the next one.
+     */
     getBodyLimit(
         page: IDocumentSkeletonPage,
         currentPages: IDocumentSkeletonPage[],
         config: ISectionBreakConfig,
         bodyBottom: number,
-        incoming: IDocumentSkeletonGlyph[] = []
+        incoming: IDocumentSkeletonGlyph[] = [],
+        keepReferences = false
     ): number {
         const contentHeight = page.pageHeight - page.marginTop - page.marginBottom;
         if (page.type !== DocumentSkeletonPageType.BODY || page.segmentId !== '' || !Number.isFinite(contentHeight)) {
@@ -553,7 +569,7 @@ export class DocumentFootnoteLayout {
         const columnCount = requestedCount === 0 ? Math.max(1, config.columnProperties?.length ?? 1) : requestedCount;
         const separator = this._layoutDecoration(this._getSeparatorKind(inherited.fragments.some((fragment) => fragment.continued)), page, config);
         const available = Math.max(1, contentHeight - bodyBottom - (separator?.height ?? 0));
-        let plan = this._layoutPageNotes(page, config, referenceIds, inherited, available, columnCount, separator);
+        let plan = this._layoutPageNotes(page, config, referenceIds, inherited, available, columnCount, separator, false, keepReferences);
         if (!plan) {
             return -1;
         }
@@ -564,7 +580,7 @@ export class DocumentFootnoteLayout {
             let high = Math.max(1, footnoteContentHeight(plan.fragments));
             for (let attempt = 0; attempt < 12 && high - low > 0.25; attempt++) {
                 const middle = (low + high) / 2;
-                const candidate = this._layoutPageNotes(page, config, referenceIds, inherited, middle, columnCount, separator);
+                const candidate = this._layoutPageNotes(page, config, referenceIds, inherited, middle, columnCount, separator, false, keepReferences);
                 if (candidate && candidate.following.length === 0) {
                     plan = candidate;
                     high = middle;
@@ -673,7 +689,8 @@ export class DocumentFootnoteLayout {
         available: number,
         columnCount: number,
         separator: IDocumentSkeletonPage | undefined,
-        reserveNotice = false
+        reserveNotice = false,
+        keepReferences = false
     ): IPageFootnoteLayout | undefined {
         const plan: IPageFootnoteLayout = {
             fragments: [...inherited.fragments],
@@ -708,7 +725,7 @@ export class DocumentFootnoteLayout {
             if (first.sections.every((section) => section.columns.every((column) => column.lines.length === 0))) {
                 // Keep a new reference with the first line of its note. Otherwise
                 // a later paragraph retry can inherit a note whose reference moved.
-                if (!delayed && (plan.fragments.length > 0 ||
+                if (!delayed && !keepReferences && (plan.fragments.length > 0 ||
                     page.sections.some((section) => section.columns.some((column) => column.lines.length > 0)))) {
                     return undefined;
                 }
@@ -721,8 +738,8 @@ export class DocumentFootnoteLayout {
                 continue;
             }
             if (first.height > available + 2) {
-                if (page.sections.some((section) => section.columns.some((column) => column.lines.length > 0)) ||
-                    plan.fragments.length > 0) {
+                if (!keepReferences && (page.sections.some((section) => section.columns.some((column) => column.lines.length > 0)) ||
+                    plan.fragments.length > 0)) {
                     return undefined;
                 }
                 this._appendFollowing(plan.following, notePages, reference, false);
@@ -739,7 +756,7 @@ export class DocumentFootnoteLayout {
             this._appendFollowing(plan.following, notePages.slice(1), reference, true);
         }
         if (!reserveNotice && notice && plan.following.length > 0) {
-            return this._layoutPageNotes(page, config, referenceIds, inherited, available, columnCount, separator, true);
+            return this._layoutPageNotes(page, config, referenceIds, inherited, available, columnCount, separator, true, keepReferences);
         }
         plan.notice = plan.following.length > 0 ? notice : undefined;
         plan.height = plan.fragments.length === 0

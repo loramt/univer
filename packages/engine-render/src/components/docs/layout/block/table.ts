@@ -532,10 +532,19 @@ export interface ISlicedTableSkeletonBuildState {
     columnIndex: number;
     preparedCellPages: Map<number, IDocumentSkeletonPage[]>;
     cellPageHeights?: number[];
+    /** How many times the current row was laid out again for its notes. */
+    noteMeasures?: number;
     pendingCellBuild: Nullable<ICellSkeletonBuildState>;
     complete: boolean;
     result: Nullable<ISlicedTableSkeletonParams>;
 }
+
+/**
+ * How many times a row is laid out again with the page heights its notes leave. The heights only decrease, so the
+ * measurement ends by itself; the bound keeps a row whose measurement does not settle from going on without end: its
+ * last heights are kept.
+ */
+const MAX_ROW_NOTE_MEASURES = 24;
 
 interface ICreateTableCache {
     rowTop: number;
@@ -679,7 +688,8 @@ export function stepTableSkeletonsBuild(state: ISlicedTableSkeletonBuildState): 
         false,
         precomputedRow,
         state.preparedCellPages,
-        state.cellPageHeights
+        state.cellPageHeights,
+        (state.noteMeasures = (state.noteMeasures ?? 0) + 1) >= MAX_ROW_NOTE_MEASURES
     );
     if (nextHeights) {
         state.cellPageHeights = nextHeights;
@@ -688,6 +698,7 @@ export function stepTableSkeletonsBuild(state: ISlicedTableSkeletonBuildState): 
         return false;
     }
     state.rowIndex++;
+    state.noteMeasures = 0;
     state.cellPageHeights = undefined;
     state.columnIndex = 0;
     state.preparedCellPages = new Map();
@@ -795,6 +806,7 @@ export function createTableSkeletons(
         const row = rowNodes.indexOf(rowNode);
 
         let cellPageHeights: number[] | undefined;
+        let measures = 0;
         do {
             cellPageHeights = dealWithTableRow(
                 ctx,
@@ -809,7 +821,8 @@ export function createTableSkeletons(
                 false,
                 precomputedTable?.rows[row],
                 undefined,
-                cellPageHeights
+                cellPageHeights,
+                ++measures >= MAX_ROW_NOTE_MEASURES
             );
         } while (cellPageHeights);
     }
@@ -1080,7 +1093,8 @@ function dealWithTableRow(
     isRepeatRow = false,
     precomputedRow?: IDocumentSkeletonRow,
     preparedCellPages?: Map<number, IDocumentSkeletonPage[]>,
-    cellPageHeights?: readonly number[]
+    cellPageHeights?: readonly number[],
+    keepHeights = false
 ): number[] | undefined {
     const documentCompatibilityPolicy = sectionBreakConfig.documentCompatibilityPolicy ?? getDocumentCompatibilityPolicy();
     const { children: cellNodes, startIndex, endIndex } = rowNode;
@@ -1171,7 +1185,7 @@ function dealWithTableRow(
     reconcileTableRowFragments(rowSkeletons, rowHeights, rowSource, viewModel, lastCellPageIndexes, availableHeight, canRowSplit, traditional, precomputedRow);
     sizeTableRowFragments(rowSkeletons, rowHeights, table, row, cache, availableHeight, pageContentHeight, traditional);
 
-    if (!isRepeatRow && cache.notes) {
+    if (!isRepeatRow && cache.notes && !keepHeights) {
         let nextHeights: number[] | undefined;
         if (canRowSplit) {
             // A row that starts the next page is measured against that page, not against what is left of this one.

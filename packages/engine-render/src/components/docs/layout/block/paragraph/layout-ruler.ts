@@ -891,7 +891,11 @@ function _appendFittingGlyphs(
     const currentLine = divide.parent;
     if (currentLine?.parent?.parent && ctx.footnoteLayout && glyphGroup.some((glyph) => glyph.noteId)) {
         const bodyBottom = currentLine.parent.parent.top + currentLine.top + currentLine.lineHeight;
-        const bodyLimit = ctx.footnoteLayout.getBodyLimit(lastPage, pages, sectionBreakConfig, bodyBottom, glyphGroup);
+        let bodyLimit = ctx.footnoteLayout.getBodyLimit(lastPage, pages, sectionBreakConfig, bodyBottom, glyphGroup);
+        if (bodyLimit === -1 && _opensBodyPage(ctx, lastPage, pages, sectionBreakConfig, currentLine)) {
+            // The line opens the page: on the next page its notes would have no more room, without end.
+            bodyLimit = ctx.footnoteLayout.getBodyLimit(lastPage, pages, sectionBreakConfig, bodyBottom, glyphGroup, true);
+        }
         if (bodyBottom > bodyLimit + LINE_LAYOUT_OVERFLOW_TOLERANCE) {
             const column = currentLine.parent;
             const cachedGlyphs = __getGlyphGroupByLine(currentLine);
@@ -2247,13 +2251,19 @@ function _lineOperator(
     // Word keeps an inline drawing below a top-bottom floating drawing from the
     // same paragraph and clips the inline drawing at the physical page bottom.
     const clipsSameParagraphInlineDrawing = hasSameParagraphTopBottomDrawingWithInline && newLineTop < section.height;
-    const footnoteBodyLimit = ctx.footnoteLayout?.getBodyLimit(
+    let footnoteBodyLimit = ctx.footnoteLayout?.getBodyLimit(
         lastPage,
         pages,
         sectionBreakConfig,
         section.top + newLineTop + lineHeight,
         glyphGroup
     );
+    if (footnoteBodyLimit === -1 && initialFootnoteTop === 0 && _opensBodyPage(ctx, lastPage, pages, sectionBreakConfig)) {
+        // A line whose notes cannot start on the page goes to the next one, unless it opens the page: there its notes
+        // would have no more room, and the line would open page after page without end. It stays, and the notes that
+        // cannot start on its page start on the next one.
+        footnoteBodyLimit = ctx.footnoteLayout!.getBodyLimit(lastPage, pages, sectionBreakConfig, section.top + newLineTop + lineHeight, glyphGroup, true);
+    }
     const availableSectionHeight = footnoteBodyLimit == null ? section.height : Math.min(section.height, footnoteBodyLimit - section.top);
     const lineOverflowTolerance = _getLineOverflowTolerance(lastPage, paragraphConfig);
     const lineOverflowsSection = !clipsSameParagraphInlineDrawing &&
@@ -2686,6 +2696,8 @@ function _updateAndPositionTable(
 
     const { top, left, height } = table;
     const localTop = top - section.top;
+    // Nothing of the body before the table on the page: moving it cannot give its notes more room.
+    const opensPage = ctx.footnoteLayout != null && _opensBodyPage(ctx, page, pages, sectionBreakConfig);
 
     // A short table and its note must move together. Waiting until the trailing
     // paragraph overflows leaves the table on the old page without its note.
@@ -2693,7 +2705,10 @@ function _updateAndPositionTable(
     if (ctx.footnoteLayout && localTop + height <= section.height && (column.lines.length > 0 || firstUnPositionedTable.isSlideTable) &&
         tableSource.textWrap === TableTextWrapType.NONE) {
         const bodyLimit = ctx.footnoteLayout.getTableBodyLimit(page, pages, sectionBreakConfig, table);
-        if (top + height > bodyLimit + LINE_LAYOUT_OVERFLOW_TOLERANCE) {
+        // Moving the table gives its notes more room only when something comes before it on the page. A table, or the
+        // part of one, that opens the page stays there (on the next page it would open the page just the same,
+        // without end), and the notes that cannot start on its page start on the next one.
+        if (top + height > bodyLimit + LINE_LAYOUT_OVERFLOW_TOLERANCE && !opensPage) {
             const previousLine = column.lines[column.lines.length - 1];
             const bodyBottom = previousLine ? section.top + previousLine.top + previousLine.lineHeight : section.top;
             ctx.footnoteLayout.getBodyLimit(page, pages, sectionBreakConfig, bodyBottom);
@@ -2770,7 +2785,9 @@ function _updateAndPositionTable(
 
             page.skeTables.set(firstTable.tableId, firstTable);
             firstTable.parent = page;
-            ctx.footnoteLayout?.getTableBodyLimit(page, pages, sectionBreakConfig, firstTable);
+            // A slice that opens the page stays there whatever its notes: those that cannot start there start on the
+            // next page.
+            ctx.footnoteLayout?.getTableBodyLimit(page, pages, sectionBreakConfig, firstTable, opensPage);
             skeTablesInParagraph.push({
                 table: firstTable,
                 tableId: firstTable.tableId,
@@ -2795,7 +2812,9 @@ function _updateAndPositionTable(
     } else {
         page.skeTables.set(tableId, table);
         table.parent = page;
-        ctx.footnoteLayout?.getTableBodyLimit(page, pages, sectionBreakConfig, table);
+        // A table that opens the page stays there whatever its notes: those that cannot start there start on the next
+        // page.
+        ctx.footnoteLayout?.getTableBodyLimit(page, pages, sectionBreakConfig, table, opensPage);
         firstUnPositionedTable.hasPositioned = true;
 
         if (
@@ -3141,6 +3160,25 @@ function _pageOperator(
     nextPage.isNaturalPageOverflow = true;
     pages.push(nextPage);
     _columnOperator(ctx, glyphGroup, pages, sectionBreakConfig, paragraphConfig, isParagraphFirstShapedText, breakPointType, defaultSpanMetrics);
+}
+
+/**
+ * Whether nothing of the body comes before this point of the page: no line (but the one given, being laid out), no
+ * table, and no note continued from the page before. Content there cannot get more room on the next page.
+ */
+function _opensBodyPage(
+    ctx: ILayoutContext,
+    page: IDocumentSkeletonPage,
+    pages: IDocumentSkeletonPage[],
+    sectionBreakConfig: ISectionBreakConfig,
+    ownLine?: IDocumentSkeletonLine
+): boolean {
+    if (page.type !== DocumentSkeletonPageType.BODY || page.segmentId !== '' || page.skeTables.size > 0) {
+        return false;
+    }
+    const hasLines = page.sections.some((section) => section.top > 0 ||
+        section.columns.some((column) => column.lines.some((line) => line !== ownLine)));
+    return !hasLines && ctx.footnoteLayout?.inheritsNotes(page, pages, sectionBreakConfig) !== true;
 }
 
 function _resolveCharacterIndents(

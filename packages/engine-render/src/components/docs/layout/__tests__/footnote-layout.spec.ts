@@ -155,6 +155,46 @@ describe('footnote body layout', () => {
         }
     });
 
+    it.each([13, 14, 15, 16, 17])('keeps a line that opens its page when its notes cannot all start there, instead of opening pages without end (first note of %i lines)', (lines) => {
+        // The verifier's B1: content whose notes cannot all start on its page goes to the next page, and content that
+        // opens an empty page found the same there, page after page, until the stack overflowed. A line with two
+        // references opens the page: the first note fills it, and with 15 lines the first line of the second has no
+        // room (without the correction: "Maximum call stack size exceeded").
+        const content = 'Reference￼￼';
+        const first = `${Array.from({ length: lines }, (_, i) => `Long ${i + 1}\r`).join('')}\n`;
+        const second = `${Array.from({ length: 3 }, (_, i) => `Short ${i + 1}\r`).join('')}\n`;
+        const note = (noteId: string, dataStream: string) => ({ type: 'footnote' as const, noteId, body: {
+            dataStream,
+            paragraphs: [...dataStream.matchAll(/\r/g)].map((match, index) => ({ paragraphId: `${noteId}-${index}`, startIndex: match.index! })),
+            sectionBreaks: [{ sectionId: `${noteId}-section`, startIndex: dataStream.length - 1 }],
+        } });
+        const bed = createParagraphLayoutTestBed(content, {
+            documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL, pageSize: { width: 400, height: 200 } },
+            body: {
+                customRanges: [9, 10].map((startIndex, index) => ({ rangeId: `reference-${index}`, rangeType: CustomRangeType.FOOTNOTE, startIndex, endIndex: startIndex, wholeEntity: true, properties: { noteId: `note-${index}` } })),
+            },
+            notes: { 'note-0': note('note-0', first), 'note-1': note('note-1', second) },
+        });
+        const skeleton = DocumentSkeleton.create(bed.viewModel, bed.ctx.docsConfig.localeService);
+        try {
+            expect(() => skeleton.calculate()).not.toThrow();
+            const pages = skeleton.getSkeletonData()!.pages;
+            expect(pages.length).toBeLessThan(10);
+            expect(getPageGlyphs(pages[0]).map((glyph) => glyph.raw).join('')).toContain('Reference');
+            const fragments = pages.flatMap((page) => page.notes ?? []);
+            const text = (id: string) => fragments.filter((fragment) => fragment.noteId === id)
+                .flatMap((fragment) => getPageGlyphs(fragment.page))
+                .filter((glyph) => glyph.count > 0)
+                .map((glyph) => glyph.raw)
+                .join('');
+            expect(text('note-0')).toBe(first);
+            expect(text('note-1')).toBe(second);
+        } finally {
+            bed.viewModel.dispose();
+            bed.dataModel.dispose();
+        }
+    });
+
     it('reserves inherited paragraph after-spacing at the end of a note', () => {
         const bed = createParagraphLayoutTestBed('Reference\uFFFC', {
             documentStyle: { documentFlavor: DocumentFlavor.TRADITIONAL, defaultParagraphStyle: { spaceBelow: { v: 13 } } },
