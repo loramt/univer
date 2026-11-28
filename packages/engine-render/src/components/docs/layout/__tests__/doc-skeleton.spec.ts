@@ -5450,6 +5450,81 @@ describe('doc skeleton', () => {
         }
     });
 
+    it.each([
+        [ObjectRelativeFromH.PAGE, 300, 190],
+        [ObjectRelativeFromH.PAGE, -50, -10],
+        [ObjectRelativeFromH.MARGIN, 20, 20],
+    ])('keeps a floating picture of a table cell inside the cell (from %s, offset %s)', (relativeFrom, posOffset, left) => {
+        // Word keeps a drawing anchored in a table cell inside the cell, from its left edge to its right edge: the
+        // page of a cell is 240 wide with text from 10, so a picture 40 wide stays between -10 and 190 from its text.
+        mockCanvasTextMetrics();
+        const T = DataStreamTreeTokenType;
+        const cellText = `${T.CUSTOM_BLOCK}Text of the cell beside the picture\r`;
+        const tableStream = `${T.TABLE_START}${T.TABLE_ROW_START}${T.TABLE_CELL_START}${cellText}${T.SECTION_BREAK}${T.TABLE_CELL_END}${T.TABLE_ROW_END}${T.TABLE_END}`;
+        const dataStream = `${tableStream}\r\n`;
+        const model = new DocumentDataModel({
+            id: 'cell-picture-inside',
+            body: {
+                dataStream,
+                customBlocks: [{ startIndex: dataStream.indexOf(T.CUSTOM_BLOCK), blockId: 'picture' }],
+                paragraphs: [...dataStream.matchAll(/\r/g)].map((match, index) => ({ startIndex: match.index!, paragraphId: `p${index}` })),
+                tables: [{ tableId: 'table', startIndex: 0, endIndex: tableStream.length }],
+                sectionBreaks: [{ sectionId: 'body', startIndex: dataStream.length - 1 }],
+            },
+            drawings: {
+                picture: {
+                    drawingId: 'picture',
+                    drawingType: DrawingTypeEnum.DRAWING_IMAGE,
+                    unitId: 'cell-picture-inside',
+                    subUnitId: 'cell-picture-inside',
+                    layoutType: PositionedObjectLayoutType.WRAP_SQUARE,
+                    docTransform: {
+                        angle: 0,
+                        size: { width: 40, height: 20 },
+                        positionH: { relativeFrom, posOffset },
+                        positionV: { relativeFrom: ObjectRelativeFromV.PARAGRAPH, posOffset: 0 },
+                    },
+                },
+            },
+            tableSource: {
+                table: {
+                    tableId: 'table',
+                    align: TableAlignmentType.START,
+                    indent: { v: 0 },
+                    textWrap: TableTextWrapType.NONE,
+                    position: {
+                        positionH: { relativeFrom: ObjectRelativeFromH.PAGE, posOffset: 0 },
+                        positionV: { relativeFrom: ObjectRelativeFromV.PAGE, posOffset: 0 },
+                    },
+                    dist: { distT: 0, distB: 0, distL: 0, distR: 0 },
+                    size: { type: TableSizeType.SPECIFIED, width: { v: 240 } },
+                    tableRows: [{ tableCells: [{}], trHeight: { val: { v: 0 }, hRule: TableRowHeightRule.AT_LEAST } }],
+                    tableColumns: [{ size: { type: TableSizeType.SPECIFIED, width: { v: 240 } } }],
+                },
+            },
+            documentStyle: {
+                documentFlavor: DocumentFlavor.TRADITIONAL,
+                pageSize: { width: 320, height: 400 },
+                marginTop: 20,
+                marginBottom: 20,
+                marginLeft: 20,
+                marginRight: 20,
+            },
+        });
+        const univer = new Univer();
+        const skeleton = DocumentSkeleton.create(new DocumentViewModel(model), univer.__getInjector().get(LocaleService));
+        try {
+            skeleton.calculate();
+            const cell = skeleton.getSkeletonData()!.pages[0].skeTables.get('table')!.rows[0].cells[0];
+            expect(cell.marginLeft).toBe(10);
+            expect(cell.skeDrawings.get('picture')!.aLeft).toBeCloseTo(left, 6);
+        } finally {
+            skeleton.dispose();
+            model.dispose();
+            univer.dispose();
+        }
+    });
+
     it.each([false, true])('sizes an inline-picture cell independently of its large paragraph mark (incremental=%s)', (incremental) => {
         mockCanvasTextMetrics();
         const T = DataStreamTreeTokenType;

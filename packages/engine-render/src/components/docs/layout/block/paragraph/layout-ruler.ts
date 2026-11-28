@@ -3649,6 +3649,16 @@ function __getDrawingPosition(
                 aLeft -= page.marginLeft;
             }
         }
+        if (
+            page.type === DocumentSkeletonPageType.CELL &&
+            ctx.dataModel.documentStyle.documentFlavor === DocumentFlavor.TRADITIONAL
+        ) {
+            // Word keeps a drawing anchored in a table cell inside the cell, from its left edge to its right edge,
+            // whatever its offset (Word 365: a picture 200 pt from the page edge of a 260 pt cell ends at the cell's
+            // right edge). The page of a cell spans the cell; aLeft counts from its text.
+            const cellRight = page.pageWidth - page.marginLeft - drawingWidth;
+            aLeft = Math.max(-page.marginLeft, Math.min(aLeft, cellRight));
+        }
         drawing.aLeft = aLeft;
         drawing.aTop = getPositionVertical(
             positionV,
